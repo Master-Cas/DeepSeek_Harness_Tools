@@ -3,8 +3,18 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "dsh-locale": "./tools/dsh-locale/index.mjs"
+  },
   "scripts": {
-    "test": "node tests/smoke.mjs"
+    "test": "node tests/run.mjs",
+    "test:locale": "node tests/run.mjs",
+    "locale": "node tools/dsh-locale/index.mjs",
+    "locale:scan": "node tools/dsh-locale/index.mjs scan --out locales/source-en.json --summary",
+    "locale:validate": "node tools/dsh-locale/index.mjs validate --source locales/source-en.json --target locales/es.json",
+    "locale:update": "node tools/dsh-locale/index.mjs update es",
+    "locale:generate": "node tools/dsh-locale/index.mjs generate",
+    "locale:check": "node --check tools/dsh-locale/index.mjs && node --check tools/lib/harness-scan.mjs && node --check tools/lib/translate.mjs && node --check tools/lib/generate.mjs && node --check tools/lib/update.mjs && node --check tools/lib/validate.mjs"
   },
   "author": {
     "name": "Master-Cas",

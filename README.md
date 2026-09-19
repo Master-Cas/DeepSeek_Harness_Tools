@@ -2,10 +2,12 @@
 
 Community tools for customizing [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) without maintaining a fork.
 
-This repository currently provides two independent installable bundles:
+This repository currently provides two independent installable bundles plus a
+universal pack generator:
 
 - **Abyss Theme** — a deep-ocean dark theme with fluorescent royal-blue / cyan accents.
 - **Spanish Language Pack** — adds `Español` to the Harness locale selector and translates every locale namespace registered by the Harness client packages, with English fallback for any future key.
+- **`dsh-locale`** — a zero-dependency CLI that discovers Harness locale namespaces dynamically and generates/updates/validates language packs for any locale.
 
 > This project is not affiliated with or endorsed by DeepSeek. DeepSeek Harness is MIT licensed; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -76,6 +78,37 @@ The preference is stored by Harness itself. Browser locales such as `es`, `es-CL
 
 The pack mirrors every locale namespace registered by the Harness client packages (common actions, settings, sidebar, workspaces, model selector, chat/composer, commands, goals, jobs, trajectory, deliverables, document previews, approval, permissions, plugins, and more). The smoke test pins the namespace list, per-namespace key counts, and placeholder signatures so new Harness keys surface as a test failure rather than silently falling back to English.
 
+### Universal language pack generator (`dsh-locale`)
+
+`tools/dsh-locale` discovers every English locale namespace registered by a
+Harness checkout **dynamically** (no hardcoded list) and can `scan`,
+`generate`, `update`, `validate` and `import` language packs. It extracts keys,
+values and `{placeholder}` signatures, translates through any
+OpenAI-compatible API in validated JSON batches, and supports a glossary and
+protected technical terms without ever storing or printing an API key. See
+[`tools/dsh-locale/README.md`](tools/dsh-locale/README.md) for the full guide.
+
+```bash
+npm run locale:scan          # discover the English catalog -> locales/source-en.json
+npm run locale:validate      # validate locales/es.json against the source
+npm test                     # locale unit tests + the original smoke test
+```
+
+The canonical catalogs live in `locales/source-en.json` and
+`locales/es.json`; the existing Spanish pack imports into the latter with all
+1643 translations preserved.
+
+## npm scripts
+
+| Script | Purpose |
+| --- | --- |
+| `npm test` | run every locale test suite plus the smoke test |
+| `npm run locale` | raw CLI (`node tools/dsh-locale/index.mjs`) |
+| `npm run locale:scan` | refresh `locales/source-en.json` from the Harness checkout |
+| `npm run locale:validate` | validate `locales/es.json` against the source |
+| `npm run locale:update` | translate only new keys into `locales/es.json` |
+| `npm run locale:check` | `node --check` the CLI and core modules |
+
 ## Requirements
 
 - DeepSeek Harness with the installable bundle/plugin system.
@@ -83,6 +116,7 @@ The pack mirrors every locale namespace registered by the Harness client package
 - `git` plus either:
   - global `dsh`; or
   - `pnpm` and a DeepSeek Harness source checkout.
+- Node.js >= 22.6 (24+ recommended) for the `dsh-locale` generator and tests.
 
 ## Repository layout
 
@@ -93,6 +127,17 @@ installers/
 plugins/
   deepseek-abyss-theme/
   deepseek-spanish/
+locales/
+  source-en.json        canonical English catalog (48 namespaces / 1643 keys)
+  es.json               canonical Spanish catalog (1643 translations)
+tools/
+  dsh-locale/           CLI + documentation
+  lib/                  scanner, catalogs, translation, generate, update, validate
+tests/
+  run.mjs               test runner
+  locale-*.test.mjs     scanner/placeholder/catalog/translate/generate/validate/CLI
+  fixtures/harness/     synthetic checkout proving generic discovery
+  smoke.mjs             original bundle smoke test
 ```
 
 ## Compatibility
