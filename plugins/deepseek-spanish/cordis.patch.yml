@@ -1,0 +1,3 @@
+- insert:
+    - id: master-cas-deepseek-spanish
+      name: '@master-cas/deepseek-spanish'
