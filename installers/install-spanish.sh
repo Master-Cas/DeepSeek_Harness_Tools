@@ -31,6 +31,19 @@ run_dsh() {
   exit 1
 }
 
+pack_plugin() {
+  local pkg="$1"
+  local out="$2"
+  if command -v pnpm >/dev/null 2>&1; then
+    (cd "$pkg" && pnpm pack --pack-destination "$out" >/dev/null)
+  elif command -v npm >/dev/null 2>&1; then
+    (cd "$pkg" && npm pack --pack-destination "$out" >/dev/null)
+  else
+    echo "ERROR: necesito pnpm o npm para crear el paquete instalable." >&2
+    exit 1
+  fi
+}
+
 if [[ "$ACTION" == "--uninstall" ]]; then
   echo "Removing $PACKAGE_NAME from profile '$PROFILE'..."
   run_dsh plugin --profile "$PROFILE" remove "$PACKAGE_NAME"
@@ -43,9 +56,16 @@ trap 'rm -rf "$TMP"' EXIT
 
 git clone --quiet --depth=1 "$REPO_URL" "$TMP/tools"
 PKG="$TMP/tools/$PACKAGE_DIR"
+pack_plugin "$PKG" "$TMP"
+
+TARBALL="$(find "$TMP" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+if [[ -z "$TARBALL" ]]; then
+  echo "ERROR: no se generó el paquete .tgz." >&2
+  exit 1
+fi
 
 echo "Installing Spanish language pack into profile '$PROFILE'..."
-run_dsh plugin --profile "$PROFILE" add "$PKG"
+run_dsh plugin --profile "$PROFILE" add "$TARBALL"
 
 echo
 echo "Spanish language pack installed."
