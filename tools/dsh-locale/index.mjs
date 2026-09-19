@@ -22,7 +22,7 @@ import { scanHarness } from '../lib/harness-scan.mjs'
 import { countNamespacePlaceholders } from '../lib/placeholders.mjs'
 import {
   loadGlossary,
-  resolveApiConfig,
+  resolveApiConfigAsync,
   translateEntries,
 } from '../lib/translate.mjs'
 import { updateLanguagePack } from '../lib/update.mjs'
@@ -70,6 +70,12 @@ validate options:
   --target FILE      target catalog (required)
   --strict            extra keys/namespaces and untranslated values fail
   --check-protected   report protected technical terms lost in translation
+
+Credentials (never printed, serialized or written):
+  options.apiKey > DSH_LOCALE_API_KEY > DEEPSEEK_API_KEY > the
+  DEEPSEEK_API_KEY DeepSeek Harness stored in the detected DSH home
+  ($DSH_HOME/.credentials.yaml, default ~/.dsh), read through Harness's own
+  @deepseek-ai/dsh-credentials-local parser.
 `
 
 const COMMON = {
@@ -94,14 +100,26 @@ function existingCatalog(options, locale) {
   return fs.existsSync(file) ? loadCatalog(file) : undefined
 }
 
-/** Build the translation runner used by generate/update. */
+/**
+ * Build the translation runner used by generate/update.
+ *
+ * The API configuration — including the credential Harness stored in the DSH
+ * home — is resolved asynchronously *inside* the returned runner, so a dry run
+ * (which never invokes it) performs no store read and no API call.
+ */
 function makeTranslateRunner(options, locale, sourceLocale = 'en') {
-  const config = resolveApiConfig({ apiUrl: options['api-url'], model: options.model })
   const loaded = loadGlossary(options.glossary ? readJson(options.glossary) : undefined)
   const batchSize = Number(options['batch-size'] ?? 40)
   const maxRetries = Number(options['max-retries'] ?? 3)
-  return (entries) =>
-    translateEntries({
+  return async (entries) => {
+    const config = await resolveApiConfigAsync({
+      apiKey: options.apiKey,
+      apiUrl: options['api-url'],
+      model: options.model,
+      harness: options.harness,
+      dshHome: options['dsh-home'],
+    })
+    return translateEntries({
       entries,
       sourceLocale,
       targetLocale: locale,
@@ -116,6 +134,7 @@ function makeTranslateRunner(options, locale, sourceLocale = 'en') {
         log(options, `  translated ${progress.done ?? progress.batch}/${progress.keys ?? entries.length} keys${fallback}`)
       },
     })
+  }
 }
 
 /** Resolve source catalog from `--source` or a live scan. */
@@ -350,4 +369,4 @@ if (import.meta.url === invoked) {
   })
 }
 
-export { HELP }
+export { HELP, makeTranslateRunner }

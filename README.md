@@ -130,7 +130,7 @@ The pack mirrors every locale namespace registered by the Harness client package
 - `validate` namespace, key and placeholder parity;
 - `import` an existing language pack back into a canonical locale catalog.
 
-It extracts source values and `{placeholder}` signatures, translates through any OpenAI-compatible API in validated JSON batches, supports glossaries and protected technical terms, and never stores or prints an API key.
+It extracts source values and `{placeholder}` signatures, translates through any OpenAI-compatible API in validated JSON batches, supports glossaries and protected technical terms, and never stores or prints an API key. It can reuse the `DEEPSEEK_API_KEY` already saved by Harness in `$DSH_HOME/.credentials.yaml` (read through Harness's own `@deepseek-ai/dsh-credentials-local` parser, never by parsing YAML itself); priority is `options.apiKey` > `DSH_LOCALE_API_KEY` > `DEEPSEEK_API_KEY` > the stored credential.
 
 The framework is language-agnostic: Spanish is the first complete reference implementation, not a limitation of the system.
 
@@ -196,7 +196,7 @@ tools/
   lib/                  scanner, catalogs, translation, generate, update, validate
 tests/
   run.mjs               test runner
-  locale-*.test.mjs     scanner/installed/catalog/translate/generate/validate/CLI
+  locale-*.test.mjs     scanner/installed/catalog/translate/credentials/generate/validate/CLI
   fixtures/harness/     synthetic checkout proving generic source discovery
   fixtures/lightweight/ synthetic ~/.dsh tree proving installed discovery
   smoke.mjs             original bundle smoke test

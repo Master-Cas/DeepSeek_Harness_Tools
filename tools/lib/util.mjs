@@ -126,16 +126,39 @@ export function sortDictionary(dictionary) {
 }
 
 /**
+ * Credentials resolved outside the environment (for example from the Harness
+ * store) that later redaction must also cover. Values are only ever compared,
+ * never printed.
+ */
+const runtimeSecrets = new Set()
+
+/**
+ * Remember one resolved credential so {@link redact} covers it even when it did
+ * not come from the process environment. The value itself is never printed.
+ *
+ * @param {unknown} value credential value.
+ * @returns {unknown} the same value, for convenient chaining.
+ */
+export function rememberSecret(value) {
+  if (typeof value === 'string' && value.length >= 6) runtimeSecrets.add(value)
+  return value
+}
+
+/**
  * Redact API keys from any value before printing or writing. DSH never stores
- * credentials, and diagnostics must never leak them either.
+ * credentials, and diagnostics must never leak them either — including a key
+ * reused from the Harness store rather than exported into the environment.
  *
  * @param {unknown} value value to sanitize.
  * @returns {string} sanitized text.
  */
 export function redact(value) {
   let text = typeof value === 'string' ? value : String(value)
-  const secrets = [process.env.DEEPSEEK_API_KEY, process.env.DSH_LOCALE_API_KEY]
-    .filter((secret) => typeof secret === 'string' && secret.length >= 6)
+  const secrets = [
+    process.env.DEEPSEEK_API_KEY,
+    process.env.DSH_LOCALE_API_KEY,
+    ...runtimeSecrets,
+  ].filter((secret) => typeof secret === 'string' && secret.length >= 6)
   for (const secret of secrets) text = text.split(secret).join('[REDACTED]')
   return text.replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]')
 }

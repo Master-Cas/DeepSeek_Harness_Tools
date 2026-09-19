@@ -25,6 +25,7 @@ tools/
   lib/
     harness-scan.mjs     source-checkout namespace/dictionary discovery
     harness-detect.mjs   source vs. ~/.dsh layout autodetection
+    harness-credentials.mjs  stored DEEPSEEK_API_KEY via Harness's own parser
     installed-scan.mjs   static @deepseek-ai/*/lib/client.js scanner
     static-js.mjs        dependency-free static JS extraction helpers
     catalog.mjs      canonical catalog format + client.js import
@@ -179,6 +180,7 @@ retried with the validation problems attached (default 3 retries).
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DEEPSEEK_API_KEY` | — | default credential |
+| `DEEPSEEK_API_KEY` (stored) | — | credential saved by DeepSeek Harness in `$DSH_HOME/.credentials.yaml`, used last |
 | `DSH_LOCALE_API_KEY` | — | explicit credential override |
 | `DSH_LOCALE_API_URL` | `https://api.deepseek.com/v1/chat/completions` | endpoint |
 | `DSH_LOCALE_MODEL` | `deepseek-chat` | model id |
@@ -190,6 +192,30 @@ validates).
 
 API keys are **never written to disk and never printed**; diagnostics redact
 both environment values and anything matching `sk-…`.
+
+### Reusing the credential saved by Harness
+
+`dsh-locale` can reuse the `DEEPSEEK_API_KEY` you already stored with DeepSeek
+Harness, so a translation run needs no extra environment variable. Resolution
+order is:
+
+```
+options.apiKey > DSH_LOCALE_API_KEY > DEEPSEEK_API_KEY
+              > DEEPSEEK_API_KEY stored in the detected DSH home
+```
+
+The store is read only through Harness's own
+`@deepseek-ai/dsh-credentials-local` package: `dsh-locale` locates its
+`lib/index.js` in the detected lightweight installation (and in a source
+checkout's `packages/credentials/credentials-local`), then calls the public
+`parseCredentialsDocument(text, filename)` export. It never parses the YAML
+itself. When the harness is a source checkout, the credential document is still
+looked up under `$DSH_HOME` / `~/.dsh`.
+
+The store is consulted lazily, only when a translation actually runs:
+`--dry-run` and `--no-translate` perform no store read. A missing store or
+parser simply falls back to the ordinary "no API key" error, and the secret is
+never printed, serialized, written or included in an error message.
 
 ### Glossary and protected terms
 
@@ -262,6 +288,9 @@ npm test              # all locale suites + the original smoke test
   credential redaction.
 - `tests/locale-translate.test.mjs` — batching, keyset/placeholder retry,
   lenient fallback, redaction.
+- `tests/locale-credentials.test.mjs` — stored `DEEPSEEK_API_KEY` resolution
+  priority, the official parser fixture, lazy dry-run resolution and secret
+  non-leakage in errors and CLI output.
 - `tests/locale-generate-update.test.mjs` — scaffolding, translation memory,
   update/prune.
 - `tests/locale-validate.test.mjs` — PASS/FAIL matrix.

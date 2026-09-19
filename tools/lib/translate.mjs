@@ -2,8 +2,13 @@
  * Automatic translation through any OpenAI-compatible chat-completions API.
  *
  * Configuration (never logged, never persisted):
- *   DEEPSEEK_API_KEY    default credential
+ *   options.apiKey      explicit credential (programmatic callers)
  *   DSH_LOCALE_API_KEY  explicit credential override
+ *   DEEPSEEK_API_KEY    default credential
+ *   stored credential   the DEEPSEEK_API_KEY Harness saved in
+ *                       `$DSH_HOME/.credentials.yaml`, read through the
+ *                       official `@deepseek-ai/dsh-credentials-local` parser
+ *                       (see {@link resolveApiConfigAsync})
  *   DSH_LOCALE_API_URL  endpoint (default https://api.deepseek.com/v1/chat/completions)
  *   DSH_LOCALE_MODEL    model id (default deepseek-chat)
  *
@@ -12,8 +17,11 @@
  * retried with the validation feedback attached.
  */
 
+import { resolveStoredHarnessCredential } from './harness-credentials.mjs'
 import { comparePlaceholders } from './placeholders.mjs'
-import { redact } from './util.mjs'
+import { redact, rememberSecret } from './util.mjs'
+
+export { resolveStoredHarnessCredential }
 
 /** Default OpenAI-compatible endpoint. */
 export const DEFAULT_API_URL = 'https://api.deepseek.com/v1/chat/completions'
@@ -37,6 +45,38 @@ export function resolveApiConfig(options = {}) {
   const apiUrl = options.apiUrl ?? process.env.DSH_LOCALE_API_URL ?? DEFAULT_API_URL
   const model = options.model ?? process.env.DSH_LOCALE_MODEL ?? DEFAULT_MODEL
   return { apiKey, apiUrl, model }
+}
+
+/**
+ * Resolve API configuration including the credential Harness already stored.
+ *
+ * Priority: `options.apiKey` > `DSH_LOCALE_API_KEY` > `DEEPSEEK_API_KEY` >
+ * `DEEPSEEK_API_KEY` saved in the detected DSH home. The synchronous
+ * {@link resolveApiConfig} stays unchanged and remains the fast path; this
+ * helper only consults the on-disk store when none of the first three layers
+ * supplied a key. The resolved value is registered for redaction and is never
+ * logged, serialized or written.
+ *
+ * @param {object} [options] resolution options.
+ * @param {string} [options.apiKey] explicit credential.
+ * @param {string} [options.apiUrl] endpoint.
+ * @param {string} [options.model] model id.
+ * @param {string} [options.harness] detected harness root used to find the parser.
+ * @param {string} [options.dshHome] explicit DSH home holding the store.
+ * @param {object} [deps] injectable dependencies (tests).
+ * @param {Function} [deps.resolveStoredHarnessCredential] store resolver override.
+ * @returns {Promise<{apiKey?: string, apiUrl: string, model: string}>} resolved config.
+ */
+export async function resolveApiConfigAsync(options = {}, deps = {}) {
+  const config = resolveApiConfig(options)
+  if (config.apiKey) return { ...config, apiKey: rememberSecret(config.apiKey) }
+
+  const resolveStored = deps.resolveStoredHarnessCredential ?? resolveStoredHarnessCredential
+  const stored = await resolveStored(options)
+  if (typeof stored === 'string' && stored.length > 0) {
+    return { ...config, apiKey: rememberSecret(stored) }
+  }
+  return config
 }
 
 /** Escape a string for use inside a RegExp. */
