@@ -6,8 +6,8 @@ authors:
   - name: "Master-Cas"
 repository-code: "https://github.com/Master-Cas/DeepSeek_Harness_Tools"
 url: "https://github.com/Master-Cas/DeepSeek_Harness_Tools"
-license: MIT
-version: "0.2.1"
+license-url: "https://github.com/Master-Cas/DeepSeek_Harness_Tools/blob/main/LICENSE"
+version: "0.3.0"
 date-released: "2026-09-19"
 abstract: "Community tooling by Master-Cas for DeepSeek Harness: Abyss Theme, Spanish Language Pack, and the dsh-locale multilingual language-pack framework."
 keywords:

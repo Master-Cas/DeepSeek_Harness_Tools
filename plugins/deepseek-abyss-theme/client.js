@@ -2,7 +2,7 @@
  * DeepSeek Abyss / Dark Ocean Theme
  * Original author: Master-Cas — https://github.com/Master-Cas
  * Original repository: https://github.com/Master-Cas/DeepSeek_Harness_Tools
- * License: MIT
+ * License: Master-Cas Personal Use License v1.0
  */
 /** Deep-ocean theme extension for DeepSeek Harness. */
 window.__ModuleLoader__.load({

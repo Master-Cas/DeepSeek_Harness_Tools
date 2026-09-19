@@ -4,6 +4,9 @@
 >
 > Original community project: **Abyss Theme · Spanish Language Pack · dsh-locale multilingual framework**.
 > DeepSeek Harness remains an upstream project by DeepSeek.
+>
+> **PERSONAL USE ONLY — NO MODIFICATION, REDISTRIBUTION OR COMMERCIAL USE WITHOUT PRIOR WRITTEN AUTHORIZATION FROM MASTER-CAS.**
+> Commercial licensing requires a separate written agreement with Master-Cas.
 
 
 Community tools for customizing [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) without maintaining a fork.
@@ -160,4 +163,21 @@ If you use, share, fork, or redistribute these tools, please keep the original a
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+**Current releases (v0.3.0 and later): Master-Cas Personal Use License v1.0.**
+
+Permitted without a separate agreement:
+- personal, private, non-commercial use of the original unmodified software;
+- normal end-user configuration exposed by the software;
+- copies reasonably necessary for installation and backup.
+
+Not permitted without prior written authorization from **Master-Cas**:
+- modifying or creating derivative versions;
+- redistributing, mirroring, repackaging or sublicensing;
+- selling, monetizing or incorporating the software into a commercial product or service;
+- any other commercial exploitation.
+
+Commercial use requires a separate written agreement and applicable financial terms with Master-Cas.
+
+See [LICENSE](LICENSE) for the controlling terms. Releases through **v0.2.1** were distributed under MIT; the historical text is preserved in [LICENSE-MIT-HISTORICAL](LICENSE-MIT-HISTORICAL). Those prior grants are not retroactively revoked.
+
+This project is **source-available, not open-source**, beginning with v0.3.0. Third-party components remain under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

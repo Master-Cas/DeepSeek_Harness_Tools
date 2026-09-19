@@ -2,7 +2,7 @@
  * DeepSeek Spanish Language Pack
  * Original author: Master-Cas — https://github.com/Master-Cas
  * Original repository: https://github.com/Master-Cas/DeepSeek_Harness_Tools
- * License: MIT
+ * License: Master-Cas Personal Use License v1.0
  */
 /** Spanish language pack for DeepSeek Harness — broad UI coverage. */
 window.__ModuleLoader__.load({

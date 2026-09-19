@@ -234,9 +234,10 @@ const ES_MANIFEST = {
 
 {
   const rootManifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-  assert.equal(rootManifest.version, '0.2.1', 'root package version')
+  assert.equal(rootManifest.version, '0.3.0', 'root package version')
   assert.equal(rootManifest.author?.name, 'Master-Cas', 'root author')
   assert.equal(rootManifest.maintainers?.[0]?.name, 'Master-Cas', 'root maintainer')
+  assert.equal(rootManifest.license, 'SEE LICENSE IN LICENSE', 'root license metadata')
   assert.equal(rootManifest['master-cas']?.originalAuthor, 'Master-Cas', 'root original author metadata')
 
   for (const file of ['AUTHORS.md', 'NOTICE.md', 'CITATION.cff']) {
@@ -248,9 +249,10 @@ const ES_MANIFEST = {
 for (const plugin of ['deepseek-abyss-theme', 'deepseek-spanish']) {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'plugins', plugin, 'package.json'), 'utf8'))
   const patch = fs.readFileSync(path.join(root, 'plugins', plugin, 'cordis.patch.yml'), 'utf8')
-  assert.equal(manifest.version, '0.2.1', `${plugin} version`)
+  assert.equal(manifest.version, '0.3.0', `${plugin} version`)
   assert.equal(manifest.author?.name, 'Master-Cas', `${plugin} author`)
   assert.equal(manifest.maintainers?.[0]?.name, 'Master-Cas', `${plugin} maintainer`)
+  assert.equal(manifest.license, 'SEE LICENSE IN LICENSE', `${plugin} license metadata`)
   assert.equal(manifest['master-cas']?.originalAuthor, 'Master-Cas', `${plugin} original author metadata`)
   assert.ok(manifest.dsh?.bundle?.patch)
   assert.ok(manifest.dsh?.client?.platform === 'web')
@@ -263,6 +265,7 @@ for (const plugin of ['deepseek-abyss-theme', 'deepseek-spanish']) {
 const generatorSource = fs.readFileSync(path.join(root, 'tools', 'lib', 'generate.mjs'), 'utf8')
 assert.ok(generatorSource.includes('Original tooling and generator author: Master-Cas'))
 assert.ok(generatorSource.includes("originalAuthor: 'Master-Cas'"))
+assert.ok(generatorSource.includes('Master-Cas Personal Use License v1.0'))
 
 console.log('DeepSeek Harness Tools smoke tests: PASS')
 

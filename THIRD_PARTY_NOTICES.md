@@ -15,3 +15,5 @@ is redistributed by this repository.
 
 DeepSeek and DeepSeek Harness names and marks belong to their respective owners.
 This community project is not affiliated with or endorsed by DeepSeek.
+
+The Master-Cas Personal Use License applies only to original Master-Cas components. The Master-Cas license does not alter the MIT license or other rights applicable to DeepSeek Harness or any other third-party component.

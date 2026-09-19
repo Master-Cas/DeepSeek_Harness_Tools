@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-tools",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "bin": {
@@ -36,6 +36,9 @@
   },
   "master-cas": {
     "originalAuthor": "Master-Cas",
-    "originalRepository": "https://github.com/Master-Cas/DeepSeek_Harness_Tools"
-  }
+    "originalRepository": "https://github.com/Master-Cas/DeepSeek_Harness_Tools",
+    "license": "Master-Cas Personal Use License v1.0",
+    "commercialUse": "Requires prior written commercial agreement with Master-Cas"
+  },
+  "license": "SEE LICENSE IN LICENSE"
 }

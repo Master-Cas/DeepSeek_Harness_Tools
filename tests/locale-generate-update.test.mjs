@@ -61,6 +61,8 @@ const existing = {
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
   assert.ok(files['cordis.patch.yml'].includes(pkg.name))
+  assert.ok(files['LICENSE'].includes('MASTER-CAS PERSONAL USE LICENSE v1.0'))
+  assert.equal(pkg.license, 'SEE LICENSE IN LICENSE')
 }
 
 // Full generation with a stub translator writes catalog and plugin.
