@@ -224,7 +224,14 @@ export async function scanInstalledHarness(harnessRoot) {
 
         const dictionary = resolveDictionary(call, text, symbols)
         if (!dictionary || typeof dictionary !== 'object' || Array.isArray(dictionary)) {
-          warnings.push(`${bundle}: no English dictionary found for namespace "${namespace}"`)
+          // `register(NS, "zh", dict)` is a sibling of the English call: it is
+          // a real registration, just not the one that owns the English
+          // dictionary, so only warn when no locale was named or English
+          // itself could not be resolved.
+          const locale = parseStringLiteral(call.args[1])
+          if (locale === undefined || locale === 'en') {
+            warnings.push(`${bundle}: no English dictionary found for namespace "${namespace}"`)
+          }
           continue
         }
 

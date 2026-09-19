@@ -343,6 +343,96 @@ function splitTopLevelOperator(text, operator) {
 }
 
 /**
+ * Split a whole-expression member access into its base and final accessor.
+ *
+ * Only the last top-level `.name` or `[...]` that consumes the entire
+ * expression counts, so calls, binary operators and optional chains stay with
+ * the other evaluators. The base is returned as raw text to be resolved
+ * recursively; no part of it is ever executed.
+ *
+ * @param {string} text trimmed expression text.
+ * @returns {{ base: string, dot?: string, bracket?: string } | undefined}
+ */
+function splitMemberAccess(text) {
+  let depth = 0
+  let quote
+  let candidate
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
+    if (quote) {
+      if (char === '\\') {
+        i++
+        continue
+      }
+      if (char === quote) quote = undefined
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char
+      continue
+    }
+    if (char === '[' && depth === 0) {
+      const balanced = extractBalanced(text, i)
+      if (balanced) {
+        if (i > 0 && balanced.end === text.length - 1) {
+          candidate = { base: text.slice(0, i).trim(), bracket: text.slice(i + 1, balanced.end) }
+        }
+        i = balanced.end
+        continue
+      }
+    }
+    if (char === '(' || char === '{' || char === '[') {
+      depth++
+      continue
+    }
+    if (char === ')' || char === '}' || char === ']') {
+      depth--
+      continue
+    }
+    if (char === '.' && depth === 0 && i > 0) {
+      const rest = text.slice(i + 1).trim()
+      if (/^[A-Za-z_$][\w$]*$/.test(rest)) {
+        candidate = { base: text.slice(0, i).trim(), dot: rest }
+      }
+    }
+  }
+  return candidate
+}
+
+/**
+ * Read one statically-known property from an already-evaluated object/array.
+ * Only own properties count, so inherited names such as `constructor` or
+ * `__proto__` can never leak through.
+ *
+ * @param {*} base a value produced by `evaluateStatic`.
+ * @param {string|number} key the static property name.
+ * @returns {*} the own property value, or `undefined`.
+ */
+function readStaticProperty(base, key) {
+  if (base === null || typeof base !== 'object') return undefined
+  const property = String(key)
+  if (!Object.prototype.hasOwnProperty.call(base, property)) return undefined
+  return base[property]
+}
+
+/**
+ * Resolve one member access whose base is statically evaluable. Both the base
+ * and (for brackets) the key come from `evaluateStatic`, so nothing runs.
+ *
+ * @param {{ base: string, dot?: string, bracket?: string }} access split access.
+ * @param {Map<string, string>} symbols declarations collected from the file.
+ * @param {Set<string>} seen recursion guard.
+ * @returns {*} the property value, or `undefined` when it cannot be resolved.
+ */
+function evaluateMemberAccess(access, symbols, seen) {
+  const base = evaluateStatic(access.base, symbols, seen)
+  if (base === null || typeof base !== 'object') return undefined
+  const key = access.dot !== undefined ? access.dot : evaluateStatic(access.bracket, symbols, seen)
+  if (typeof key !== 'string' && typeof key !== 'number') return undefined
+  return readStaticProperty(base, key)
+}
+
+/**
  * Statically evaluate a JavaScript expression against known declarations.
  *
  * @param {string} expression raw expression text.
@@ -353,6 +443,13 @@ function splitTopLevelOperator(text, operator) {
 export function evaluateStatic(expression, symbols, seen = new Set()) {
   const text = String(expression ?? '').trim()
   if (!text) return undefined
+
+  // Member access binds tighter than `+`, so a base containing a top-level
+  // `+` belongs to the concatenation evaluator below instead.
+  const access = splitMemberAccess(text)
+  if (access && splitTopLevelOperator(access.base, '+').length === 1) {
+    return evaluateMemberAccess(access, symbols, seen)
+  }
 
   if (text.startsWith('{')) {
     const balanced = extractBalanced(text, 0)

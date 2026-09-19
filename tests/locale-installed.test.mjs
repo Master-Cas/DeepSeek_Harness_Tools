@@ -7,8 +7,8 @@
  *   - `scanHarness` autodetects `mode: "installed"` for `@deepseek-ai` trees,
  *     including the per-profile `profiles/<name>/node_modules` layout;
  *   - namespaces/dictionaries are recovered statically from `const NS`,
- *     `const en = { ... }`, `en = { ... }`, spreads, copies and template
- *     literals;
+ *     `const en = { ... }`, `en = { ... }`, spreads, copies, template
+ *     literals and static member access (`en["key"]`, `obj.key`);
  *   - package entries may be symlinks or real directories;
  *   - discoverability is generic: a namespace invented at test time is found
  *     and no fixture name appears anywhere in the scanner sources.
@@ -19,6 +19,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectHarnessMode } from '../tools/lib/harness-detect.mjs'
 import { scanHarness } from '../tools/lib/harness-scan.mjs'
+import { collectDeclarations, evaluateStatic } from '../tools/lib/static-js.mjs'
 import { resolveHarness } from '../tools/lib/util.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -28,6 +29,39 @@ const sourceFixture = path.join(root, 'tests', 'fixtures', 'harness')
 const scannerSources = ['harness-scan.mjs', 'harness-detect.mjs', 'installed-scan.mjs', 'static-js.mjs'].map(
   (file) => fs.readFileSync(path.join(root, 'tools', 'lib', file), 'utf8'),
 )
+
+// --- Static member access (bracket + dot) ---------------------------------
+
+const memberSymbols = collectDeclarations(
+  [
+    'const accessEn = { "preset.readOnly": "Read Only", "preset.workspaceWrite": "Workspace Write" };',
+    'const preset = { readOnly: "Read Only" };',
+    'const nested = { inner: { deep: "Deep value" }, list: ["zero", "one"] };',
+  ].join('\n'),
+)
+
+assert.equal(
+  evaluateStatic('accessEn["preset.readOnly"]', memberSymbols),
+  'Read Only',
+  'double-quoted bracket member',
+)
+assert.equal(
+  evaluateStatic("accessEn['preset.readOnly']", memberSymbols),
+  'Read Only',
+  'single-quoted bracket member',
+)
+assert.equal(evaluateStatic('preset.readOnly', memberSymbols), 'Read Only', 'dot member')
+assert.equal(evaluateStatic('nested.inner.deep', memberSymbols), 'Deep value', 'chained dot member')
+assert.equal(evaluateStatic('nested["inner"]["deep"]', memberSymbols), 'Deep value', 'chained bracket member')
+assert.equal(evaluateStatic('nested.list[1]', memberSymbols), 'one', 'array index member')
+assert.equal(
+  evaluateStatic('"P" + preset.readOnly', memberSymbols),
+  'PRead Only',
+  'member access keeps + precedence',
+)
+// Own properties only: inherited names must never leak.
+assert.equal(evaluateStatic('preset.constructor', memberSymbols), undefined, 'no prototype access')
+assert.equal(evaluateStatic('preset["__proto__"]', memberSymbols), undefined, 'no prototype access via bracket')
 
 // --- Autodetection --------------------------------------------------------
 
@@ -138,6 +172,39 @@ try {
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true })
+}
+
+// --- Harness 0.1.5-rc.2 shape: sibling locale calls + member values --------
+// `permission.access` registered `register(NS, "zh", { key: accessZh[key] })`
+// followed by the `"en"` sibling. The non-English call must not warn, and the
+// English values must survive static member access.
+
+const rc2Namespace = `probe.rc2.${process.pid}.${Date.now()}`
+const rc2 = fs.mkdtempSync(path.join(root, '.tmp-locale-rc2-'))
+try {
+  const scope = path.join(rc2, 'node_modules', '@deepseek-ai')
+  const dir = path.join(scope, 'ui-rc2')
+  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'lib', 'client.js'),
+    `const NS = ${JSON.stringify(rc2Namespace)};\n` +
+      'const accessZh = { "preset.readOnly": "仅可查看" };\n' +
+      'const accessEn = { "preset.readOnly": "Read Only" };\n' +
+      'function apply(ctx) {\n' +
+      '  ctx.effect(() => [\n' +
+      '    ctx.locale.register(NS, "zh", { "preset.readOnly": accessZh["preset.readOnly"] }),\n' +
+      '    ctx.locale.register(NS, "en", { "preset.readOnly": accessEn["preset.readOnly"] }),\n' +
+      '  ]);\n' +
+      '}\n' +
+      'export { apply };\n',
+  )
+
+  const scanned = await scanHarness(rc2)
+  assert.equal(scanned.mode, 'installed')
+  assert.equal(scanned.warnings.length, 0, `rc2 warnings: ${scanned.warnings.join('; ')}`)
+  assert.equal(scanned.namespaces[rc2Namespace]['preset.readOnly'], 'Read Only')
+} finally {
+  fs.rmSync(rc2, { recursive: true, force: true })
 }
 
 // --- resolveHarness: explicit/env before the ~/.dsh fallback --------------
