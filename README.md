@@ -96,6 +96,14 @@ plugins/
 
 Initial development and smoke validation target DeepSeek Harness `0.1.6-alpha.2` and its current Client extension APIs. The installers fail early when the CLI/profile mechanism is unavailable.
 
+## Author
+
+Created and maintained by **Master-Cas**.
+
+GitHub: https://github.com/Master-Cas
+
+If you use, share, fork, or redistribute these tools, please keep the original attribution to **Master-Cas** and the repository link.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
