@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use DeepSeek_Harness_Tools, please cite Master-Cas as the original author."
+title: "DeepSeek Harness Tools"
+type: software
+authors:
+  - name: "Master-Cas"
+repository-code: "https://github.com/Master-Cas/DeepSeek_Harness_Tools"
+url: "https://github.com/Master-Cas/DeepSeek_Harness_Tools"
+license: MIT
+version: "0.2.1"
+date-released: "2026-09-19"
+abstract: "Community tooling by Master-Cas for DeepSeek Harness: Abyss Theme, Spanish Language Pack, and the dsh-locale multilingual language-pack framework."
+keywords:
+  - DeepSeek Harness
+  - localization
+  - i18n
+  - theme
+  - language pack
+  - Master-Cas

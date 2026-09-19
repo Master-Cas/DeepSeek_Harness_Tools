@@ -1,4 +1,7 @@
-# dsh-locale — universal language packs for DeepSeek Harness
+# dsh-locale
+
+**Original author: [Master-Cas](https://github.com/Master-Cas)**
+Original repository: https://github.com/Master-Cas/DeepSeek_Harness_Tools — universal language packs for DeepSeek Harness
 
 `dsh-locale` is a zero-dependency Node CLI that discovers every English locale
 namespace registered by a DeepSeek Harness checkout, extracts keys, values and

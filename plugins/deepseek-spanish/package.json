@@ -1,6 +1,6 @@
 {
   "name": "@master-cas/deepseek-spanish",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Spanish language pack for DeepSeek Harness",
   "license": "MIT",
   "type": "module",
@@ -26,5 +26,18 @@
     "url": "https://github.com/Master-Cas/DeepSeek_Harness_Tools.git",
     "directory": "plugins/deepseek-spanish"
   },
-  "homepage": "https://github.com/Master-Cas/DeepSeek_Harness_Tools#spanish-language-pack"
+  "homepage": "https://github.com/Master-Cas/DeepSeek_Harness_Tools#readme",
+  "maintainers": [
+    {
+      "name": "Master-Cas",
+      "url": "https://github.com/Master-Cas"
+    }
+  ],
+  "bugs": {
+    "url": "https://github.com/Master-Cas/DeepSeek_Harness_Tools/issues"
+  },
+  "master-cas": {
+    "originalAuthor": "Master-Cas",
+    "originalRepository": "https://github.com/Master-Cas/DeepSeek_Harness_Tools"
+  }
 }

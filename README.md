@@ -1,5 +1,11 @@
 # DeepSeek Harness Tools
 
+> **Created and maintained by [Master-Cas](https://github.com/Master-Cas).**
+>
+> Original community project: **Abyss Theme · Spanish Language Pack · dsh-locale multilingual framework**.
+> DeepSeek Harness remains an upstream project by DeepSeek.
+
+
 Community tools for customizing [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) without maintaining a fork.
 
 This repository currently provides two independent installable bundles plus a
