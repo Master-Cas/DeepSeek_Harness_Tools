@@ -146,13 +146,13 @@ Examples for new languages:
 
 ```bash
 # German
-node tools/dsh-locale/index.mjs generate de --label "Deutsch" --harness /path/to/deepseek-harness --out plugins/deepseek-de
+node tools/dsh-locale/index.mjs generate de   --label "Deutsch"   --harness /path/to/deepseek-harness   --out plugins/deepseek-de
 
 # French
-node tools/dsh-locale/index.mjs generate fr --label "Français" --harness /path/to/deepseek-harness --out plugins/deepseek-fr
+node tools/dsh-locale/index.mjs generate fr   --label "Français"   --harness /path/to/deepseek-harness   --out plugins/deepseek-fr
 
 # Brazilian Portuguese
-node tools/dsh-locale/index.mjs generate pt-BR --label "Português (Brasil)" --harness /path/to/deepseek-harness --out plugins/deepseek-pt-br
+node tools/dsh-locale/index.mjs generate pt-BR   --label "Português (Brasil)"   --harness /path/to/deepseek-harness   --out plugins/deepseek-pt-br
 ```
 
 The canonical catalogs live in `locales/source-en.json` and
