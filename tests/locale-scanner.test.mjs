@@ -14,6 +14,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fixtureRoot = path.join(root, 'tests', 'fixtures', 'harness')
 
 const fixture = await scanHarness(fixtureRoot)
+assert.equal(fixture.mode, 'source', 'fixture harness mode')
+assert.equal(fixture.root, fixtureRoot, 'fixture harness root')
 assert.equal(fixture.stats.namespaces, 4, 'fixture namespace count')
 assert.equal(fixture.stats.keys, 8, 'fixture key count')
 assert.deepEqual(Object.keys(fixture.namespaces).sort(), ['alpha', 'beta', 'delta', 'gamma'])
@@ -33,6 +35,12 @@ if (!fs.existsSync(path.join(HARNESS, 'package.json'))) {
   console.log(`scanner tests: fixture PASS; real harness not found at ${HARNESS} (skipped)`)
 } else {
   const scan = await scanHarness(HARNESS)
+  assert.equal(scan.mode, 'source', 'real harness mode')
+  assert.equal(scan.root, path.resolve(HARNESS), 'real harness root')
+  assert.ok(
+    scan.harnessVersion === undefined || typeof scan.harnessVersion === 'string',
+    'harnessVersion is a string when readable',
+  )
   assert.equal(scan.stats.namespaces, 48, 'real harness namespace count')
   assert.equal(scan.stats.keys, 1643, 'real harness key count')
   assert.equal(scan.stats.placeholders, 322, 'real harness placeholder count')

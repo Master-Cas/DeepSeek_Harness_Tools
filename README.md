@@ -122,9 +122,9 @@ The pack mirrors every locale namespace registered by the Harness client package
 
 ### Multilingual Framework (`dsh-locale`)
 
-`dsh-locale` is the multilingual framework included in this repository. It discovers every English locale namespace registered by a Harness checkout **dynamically** — there is no hardcoded language-specific namespace list — and can:
+`dsh-locale` is the multilingual framework included in this repository. It discovers every English locale namespace registered by a Harness installation **dynamically** — there is no hardcoded language-specific namespace list — and can:
 
-- `scan` the current Harness locale surface;
+- `scan` the current Harness locale surface, from a **source checkout** or a lightweight **`~/.dsh` installation** (compiled `@deepseek-ai/*/lib/client.js` bundles are parsed statically, never executed);
 - `generate` a complete pack for a new language;
 - `update` an existing language by translating only newly added Harness keys;
 - `validate` namespace, key and placeholder parity;
@@ -196,8 +196,9 @@ tools/
   lib/                  scanner, catalogs, translation, generate, update, validate
 tests/
   run.mjs               test runner
-  locale-*.test.mjs     scanner/placeholder/catalog/translate/generate/validate/CLI
-  fixtures/harness/     synthetic checkout proving generic discovery
+  locale-*.test.mjs     scanner/installed/catalog/translate/generate/validate/CLI
+  fixtures/harness/     synthetic checkout proving generic source discovery
+  fixtures/lightweight/ synthetic ~/.dsh tree proving installed discovery
   smoke.mjs             original bundle smoke test
 ```
 

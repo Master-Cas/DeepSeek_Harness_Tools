@@ -4,7 +4,8 @@
 Original repository: https://github.com/Master-Cas/DeepSeek_Harness_Tools — universal language packs for DeepSeek Harness
 
 `dsh-locale` is a zero-dependency Node CLI that discovers every English locale
-namespace registered by a DeepSeek Harness checkout, extracts keys, values and
+namespace registered by a DeepSeek Harness installation — a full source
+checkout or a lightweight `~/.dsh` install — extracts keys, values and
 `{placeholder}` signatures, and generates an installable Harness language pack.
 It can translate through any OpenAI-compatible chat-completions API, keep an
 existing pack up to date, and validate a translation against its source.
@@ -12,15 +13,20 @@ existing pack up to date, and validate a translation against its source.
 The namespace list is **discovered, never hardcoded**: the scanner walks the
 Harness source, finds each `ctx.locale.register(...)` call, resolves the
 namespace expression and the English dictionary (including imported modules,
-inline objects and `register(ns, locale, dict)` tuples), and reads the exact
-dictionary values.
+inline objects, spreads and `register(ns, locale, dict)` tuples), and reads the
+exact dictionary values. When pointed at a `~/.dsh` installation it parses the
+published `@deepseek-ai/*/lib/client.js` bundles statically, without executing
+them.
 
 ```
 tools/
   dsh-locale/
     index.mjs        CLI entry point
   lib/
-    harness-scan.mjs dynamic namespace/dictionary discovery
+    harness-scan.mjs     source-checkout namespace/dictionary discovery
+    harness-detect.mjs   source vs. ~/.dsh layout autodetection
+    installed-scan.mjs   static @deepseek-ai/*/lib/client.js scanner
+    static-js.mjs        dependency-free static JS extraction helpers
     catalog.mjs      canonical catalog format + client.js import
     placeholders.mjs {placeholder} extraction and preservation
     translate.mjs    OpenAI-compatible batching, glossary, retry
@@ -34,12 +40,17 @@ tools/
 
 - Node.js >= 22.6 (24+ recommended). Source `locales.ts` modules are imported
   with type stripping; the compiled `lib/types/**` ESM is used as a fallback.
+  Lightweight `~/.dsh` scanning needs no build step or TypeScript support: it
+  reads the compiled bundles as text.
 
 ## Quick start
 
 ```bash
 # Discover the current English catalog (prints JSON, optional --out).
 npm run locale:scan
+
+# Autodetect a lightweight ~/.dsh installation and scan it statically.
+node tools/dsh-locale/index.mjs scan --harness ~/.dsh --json
 
 # Generate a Spanish pack from the canonical catalogs (no API calls).
 node tools/dsh-locale/index.mjs generate es \
@@ -59,26 +70,36 @@ The CLI is also exposed as `dsh-locale` when the repository is linked
 
 ### `scan`
 
-Discovers namespaces, keys, values and placeholders.
+Discovers namespaces, keys, values and placeholders. `--harness` accepts a
+source checkout **or** a lightweight `~/.dsh` installation; the mode is
+autodetected (`package.json` + `packages/` versus an `@deepseek-ai` scope).
 
 ```bash
 node tools/dsh-locale/index.mjs scan --harness /path/to/deepseek-harness --json
+node tools/dsh-locale/index.mjs scan --harness ~/.dsh --json
 node tools/dsh-locale/index.mjs scan --out locales/source-en.json --summary
 ```
 
 On the reference checkout this discovers **48 namespaces / 1643 keys / 322
-placeholders** with zero warnings. Output fields:
+placeholders** with zero warnings; the compiled `~/.dsh` bundles yield the same
+catalog. Output fields:
 
 ```json
 {
   "version": 1,
+  "mode": "source",
+  "root": "/home/ubuntu/deepseek-harness",
   "harness": "deepseek-harness",
+  "harnessVersion": "0.1.6-alpha.2",
   "namespaces": { "common": { "cancel": "Cancel" } },
   "sources": { "common": "packages/client/locale/src/client/index.ts" },
   "stats": { "namespaces": 48, "keys": 1643, "placeholders": 322, "catalogHash": "..." },
   "warnings": []
 }
 ```
+
+`mode` is `source` or `installed`; `root` is the resolved harness path; and
+`harnessVersion` is read from `@deepseek-ai/dsh/package.json` when available.
 
 ### `generate`
 
@@ -161,7 +182,7 @@ retried with the validation problems attached (default 3 retries).
 | `DSH_LOCALE_API_KEY` | — | explicit credential override |
 | `DSH_LOCALE_API_URL` | `https://api.deepseek.com/v1/chat/completions` | endpoint |
 | `DSH_LOCALE_MODEL` | `deepseek-chat` | model id |
-| `DSH_HARNESS` | auto-detect | default `--harness` |
+| `DSH_HARNESS` | auto-detect | default `--harness` (source checkout or `~/.dsh`) |
 
 CLI flags: `--api-url`, `--model`, `--batch-size`, `--max-retries`,
 `--glossary FILE`, `--lenient` (copy English for a batch that never
@@ -230,8 +251,12 @@ for (const [namespace, dictionary] of Object.entries(dictionaries)) {
 npm test              # all locale suites + the original smoke test
 ```
 
-- `tests/locale-scanner.test.mjs` — synthetic fixture (four registration
+- `tests/locale-scanner.test.mjs` — synthetic source fixture (four registration
   shapes) plus the reference-checkout acceptance numbers (48/1643/322).
+- `tests/locale-installed.test.mjs` — compiled `~/.dsh` fixtures (constant,
+  aliased, literal and tuple registrations), symlinked and real package dirs,
+  layout autodetection, an invented namespace proving there is no hardcoded
+  list, and `resolveHarness` explicit/env precedence.
 - `tests/locale-placeholders.test.mjs` — placeholder extraction/comparison.
 - `tests/locale-catalog.test.mjs` — Spanish-pack import (1643 keys) and
   credential redaction.

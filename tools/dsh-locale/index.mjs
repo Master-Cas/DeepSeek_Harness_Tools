@@ -47,7 +47,8 @@ Usage:
   dsh-locale import    <client.js> [--locale es] [--out FILE]
 
 Common options:
-  --harness PATH     DeepSeek Harness checkout (env DSH_HARNESS, default auto-detect)
+  --harness PATH     DeepSeek Harness source checkout or lightweight ~/.dsh
+                     installation (env DSH_HARNESS, default auto-detect)
   --source FILE      canonical source catalog (default: live scan)
   --json             machine-readable output
   --help, -h         this help

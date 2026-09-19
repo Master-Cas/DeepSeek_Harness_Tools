@@ -31,6 +31,26 @@ try {
     const json = JSON.parse(outcome.stdout)
     assert.equal(Object.keys(json.namespaces).length, 4)
     assert.equal(json.stats.keys, 8)
+    assert.equal(json.mode, 'source')
+  }
+
+  // scan autodetects a lightweight ~/.dsh fixture and parses it statically.
+  {
+    const installed = path.join(root, 'tests', 'fixtures', 'lightweight')
+    const outcome = run(['scan', '--harness', installed, '--json'])
+    assert.equal(outcome.status, 0, outcome.stderr)
+    const json = JSON.parse(outcome.stdout)
+    assert.equal(json.mode, 'installed')
+    assert.equal(json.harnessVersion, '3.1.4-fixture')
+    assert.equal(Object.keys(json.namespaces).length, 3)
+    assert.equal(json.stats.keys, 8)
+  }
+
+  // --help documents both layouts.
+  {
+    const help = run(['--help'])
+    assert.equal(help.status, 0)
+    assert.ok(help.stdout.includes('source checkout or lightweight ~/.dsh'))
   }
 
   // --help and unknown commands.

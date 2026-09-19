@@ -1,26 +1,39 @@
 /**
  * Dynamic Harness locale discovery.
  *
- * The scanner never hardcodes a namespace list. It walks the Harness source
- * tree, finds every `ctx.locale.register(...)` call, resolves the namespace
- * expression and the English dictionary expression, and loads the dictionary
- * module so values and placeholders are exact. Registration forms covered:
+ * `scanHarness(path)` autodetects the harness flavor and never hardcodes a
+ * namespace list:
+ *
+ *   - **source** (a checkout with `package.json` + `packages/`): walks the
+ *     TypeScript source, finds every `ctx.locale.register(...)` call, resolves
+ *     the namespace and dictionary expressions, and imports the dictionary
+ *     module so values and placeholders are exact. The source `.ts` modules
+ *     are preferred (Node >= 22.6 strips TypeScript types), with the compiled
+ *     `lib/types/**` ESM as a fallback.
+ *   - **installed** (a lightweight `~/.dsh` tree with an `@deepseek-ai` scope):
+ *     reads published `@deepseek-ai/<pkg>/lib/client.js` bundles *statically*
+ *     (they reference the browser runtime and must not be executed), see
+ *     `installed-scan.mjs`.
+ *
+ * Registration forms covered by both modes:
  *
  *   register(NS, { zh, en })                 // typed bilingual form
  *   register(NS, { zh: zhX, en: enX })       // aliased imports
  *   register('literal.ns', { zh, en })       // inline namespace literal
- *   register(NS, locale, dict)               // one locale per call
- *
- * Namespaces and dictionaries are discovered from source; dictionary values
- * are imported. The source `.ts` modules are preferred (Node >= 22.6 strips
- * TypeScript types), with the compiled `lib/types/**` ESM as a fallback.
+ *   register(NS, locale, dict)               // one locale per call / tuples
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { detectHarnessMode } from './harness-detect.mjs'
+import { scanInstalledHarness } from './installed-scan.mjs'
 import { countNamespacePlaceholders } from './placeholders.mjs'
+import { extractBalanced, findRegisterCalls, splitTopLevel } from './static-js.mjs'
 import { hash, sortedKeys } from './util.mjs'
+
+// Keep the historical helper exports available from this module too.
+export { extractBalanced, findRegisterCalls, splitTopLevel } from './static-js.mjs'
 
 const SKIP_DIRS = new Set(['node_modules', 'lib', 'dist', 'types', 'coverage', 'tests', '__tests__'])
 
@@ -74,92 +87,6 @@ export function parseStringConsts(text) {
   const pattern = /(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*['"]([^'"]+)['"]/g
   for (const match of text.matchAll(pattern)) map.set(match[1], match[2])
   return map
-}
-
-/** Extract the balanced `(...)`, `{...}` or `[...]` starting at `start`. */
-export function extractBalanced(text, start) {
-  const open = text[start]
-  const close = open === '(' ? ')' : open === '{' ? '}' : open === '[' ? ']' : undefined
-  if (!close) return undefined
-  let depth = 0
-  let quote
-  for (let i = start; i < text.length; i++) {
-    const char = text[i]
-    if (quote) {
-      if (char === '\\') {
-        i++
-        continue
-      }
-      if (char === quote) quote = undefined
-      continue
-    }
-    if (char === "'" || char === '"' || char === '`') {
-      quote = char
-      continue
-    }
-    if (char === open) depth++
-    else if (char === close) {
-      depth--
-      if (depth === 0) return { text: text.slice(start, i + 1), end: i }
-    }
-  }
-  return undefined
-}
-
-/** Split a call/object body on top-level commas. */
-export function splitTopLevel(text) {
-  const parts = []
-  let depth = 0
-  let quote
-  let current = ''
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i]
-    if (quote) {
-      current += char
-      if (char === '\\') {
-        current += text[++i]
-        continue
-      }
-      if (char === quote) quote = undefined
-      continue
-    }
-    if (char === "'" || char === '"' || char === '`') {
-      quote = char
-      current += char
-      continue
-    }
-    if (char === '(' || char === '{' || char === '[') depth++
-    if (char === ')' || char === '}' || char === ']') depth--
-    if (char === ',' && depth === 0) {
-      parts.push(current.trim())
-      current = ''
-      continue
-    }
-    current += char
-  }
-  if (current.trim()) parts.push(current.trim())
-  return parts
-}
-
-/** Locate every `locale.register(...)` call outside comments. */
-export function findRegisterCalls(text) {
-  const calls = []
-  const pattern = /locale\.register\s*\(/g
-  for (const match of text.matchAll(pattern)) {
-    const before = text.slice(0, match.index)
-    const lineStart = before.lastIndexOf('\n') + 1
-    const line = text.slice(lineStart, match.index).trimStart()
-    if (line.startsWith('*') || line.startsWith('//')) continue
-    const open = match.index + match[0].length - 1
-    const balanced = extractBalanced(text, open)
-    if (!balanced) continue
-    calls.push({
-      index: match.index,
-      args: splitTopLevel(balanced.text.slice(1, -1)),
-      body: balanced.text.slice(1, -1),
-    })
-  }
-  return calls
 }
 
 /** Map a source `.ts` path to its compiled `lib/types/**.js` sibling. */
@@ -277,12 +204,12 @@ async function resolveNamespace(sourceFile, expression, imports, consts) {
 }
 
 /**
- * Scan a Harness checkout and return the English catalog.
- * @param {string} harnessRoot absolute path to the checkout.
- * @returns {Promise<{ version: number, harness: string, namespaces: Record<string, Record<string, string>>, stats: object, warnings: string[] }>}
+ * Scan a Harness **source checkout** and return the English catalog.
+ * @param {{ root: string, harnessVersion?: string }} detected detection result.
+ * @returns {Promise<{ version: number, mode: 'source', root: string, harness: string, harnessVersion?: string, namespaces: Record<string, Record<string, string>>, sources: Record<string,string>, stats: object, warnings: string[] }>}
  */
-export async function scanHarness(harnessRoot) {
-  const root = path.resolve(harnessRoot)
+export async function scanSourceHarness(detected) {
+  const root = detected.root
   const files = collectSourceFiles(root)
   const namespaces = {}
   const sources = {}
@@ -354,7 +281,10 @@ export async function scanHarness(harnessRoot) {
 
   return {
     version: 1,
+    mode: 'source',
+    root,
     harness: path.basename(root),
+    harnessVersion: detected.harnessVersion,
     namespaces: ordered,
     sources,
     stats: {
@@ -365,4 +295,26 @@ export async function scanHarness(harnessRoot) {
     },
     warnings,
   }
+}
+
+/**
+ * Scan a DeepSeek Harness installation and return the English catalog.
+ *
+ * The mode is autodetected from the path: a source checkout (`package.json` +
+ * `packages/`) or a lightweight `~/.dsh` installation containing an
+ * `@deepseek-ai` scope. Installed bundles are parsed statically and never
+ * executed.
+ *
+ * @param {string} harnessRoot a checkout, a `~/.dsh` root or a scope path.
+ * @returns {Promise<object>} the catalog plus `mode`, `root` and `harnessVersion`.
+ */
+export async function scanHarness(harnessRoot) {
+  const detected = detectHarnessMode(harnessRoot)
+  if (!detected) {
+    throw new Error(
+      `cannot locate a DeepSeek Harness checkout or installation at ${path.resolve(harnessRoot)}`,
+    )
+  }
+  if (detected.mode === 'installed') return scanInstalledHarness(detected.root)
+  return scanSourceHarness(detected)
 }

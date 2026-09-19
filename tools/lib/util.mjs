@@ -7,6 +7,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { detectHarnessMode } from './harness-detect.mjs'
 
 /** Locales that a generated pack can target, all BCP 47-style tags. */
 export const LOCALE_ID_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/
@@ -173,21 +174,49 @@ export function percent(ratio) {
   return `${(ratio * 100).toFixed(1)}%`
 }
 
-/** Resolve a harness checkout from an explicit value, env or common locations. */
+/**
+ * Resolve a harness installation from an explicit value, env or common paths.
+ *
+ * Autodetection always honors an explicit `--harness` and `DSH_HARNESS` first
+ * (either layout), prefers a **source checkout** among the common locations,
+ * and only then falls back to a lightweight `~/.dsh` installation. Passing
+ * `--harness ~/.dsh` therefore keeps working even when a checkout is present.
+ *
+ * @param {string} [explicit] `--harness` value.
+ * @returns {string} absolute harness root.
+ */
 export function resolveHarness(explicit) {
-  const candidates = []
-  if (explicit) candidates.push(explicit)
-  if (process.env.DSH_HARNESS) candidates.push(process.env.DSH_HARNESS)
-  candidates.push(path.join(process.cwd(), '..', 'deepseek-harness'))
-  candidates.push(path.join(os.homedir(), 'deepseek-harness'))
-  candidates.push('/home/ubuntu/deepseek-harness')
-  for (const candidate of candidates) {
-    if (!candidate) continue
-    const resolved = path.resolve(candidate)
-    if (fs.existsSync(path.join(resolved, 'package.json'))) return resolved
+  // Explicit and environment values win for whichever layout they name.
+  for (const candidate of [explicit, process.env.DSH_HARNESS]) {
+    const detected = detectHarnessMode(candidate)
+    if (detected) return detected.root
   }
+
+  // Then the well-known source-checkout locations.
+  const sourceCandidates = [
+    path.join(process.cwd(), '..', 'deepseek-harness'),
+    path.join(os.homedir(), 'deepseek-harness'),
+    '/home/ubuntu/deepseek-harness',
+  ]
+  for (const candidate of sourceCandidates) {
+    const detected = detectHarnessMode(candidate)
+    if (detected?.mode === 'source') return detected.root
+  }
+
+  // Finally, a lightweight ~/.dsh installation.
+  const installedCandidates = [
+    path.join(os.homedir(), '.dsh'),
+    path.join(process.cwd(), '.dsh'),
+    '/home/ubuntu/.dsh',
+  ]
+  for (const candidate of installedCandidates) {
+    const detected = detectHarnessMode(candidate)
+    if (detected?.mode === 'installed') return detected.root
+  }
+
   throw new Error(
-    'cannot locate a DeepSeek Harness checkout; pass --harness <path> or set DSH_HARNESS',
+    'cannot locate a DeepSeek Harness source checkout or lightweight ~/.dsh installation; ' +
+      'pass --harness <path> or set DSH_HARNESS',
   )
 }
 
