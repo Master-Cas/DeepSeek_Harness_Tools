@@ -1,6 +1,6 @@
 {
   "name": "@master-cas/deepseek-abyss-theme",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deep-ocean fluorescent theme for DeepSeek Harness",
   "license": "MIT",
   "type": "module",

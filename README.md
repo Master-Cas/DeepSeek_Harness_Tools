@@ -5,7 +5,7 @@ Community tools for customizing [DeepSeek Harness](https://github.com/deepseek-a
 This repository currently provides two independent installable bundles:
 
 - **Abyss Theme** — a deep-ocean dark theme with fluorescent royal-blue / cyan accents.
-- **Spanish Language Pack** — adds `Español` to the Harness locale selector and translates the main day-to-day UI surfaces, with English fallback for untranslated strings.
+- **Spanish Language Pack** — adds `Español` to the Harness locale selector and translates every locale namespace registered by the Harness client packages, with English fallback for any future key.
 
 > This project is not affiliated with or endorsed by DeepSeek. DeepSeek Harness is MIT licensed; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -58,7 +58,10 @@ It does not patch the Harness source tree. The palette focuses on:
 - fluorescent royal-blue primary accent;
 - bioluminescent cyan secondary accents;
 - cool blue-grey text and borders;
-- fluorescent treatment for the existing whale mark.
+- fluorescent treatment for the existing whale mark;
+- abyss fills for the light control surfaces the base palette ships white, and
+  deep ink on the light/selected controls that keep a light fill, so text and
+  icons stay readable without changing dark appearance.
 
 ### Spanish Language Pack
 
@@ -71,7 +74,7 @@ ctx.locale.register(namespace, 'es', dictionary)
 
 The preference is stored by Harness itself. Browser locales such as `es`, `es-CL`, and `es-ES` can resolve to Spanish through the normal locale registry.
 
-The first release translates the highest-use surfaces (common actions, settings, sidebar, workspaces, model selector, chat/composer, commands, goals, and model settings). Missing keys intentionally fall back to English.
+The pack mirrors every locale namespace registered by the Harness client packages (common actions, settings, sidebar, workspaces, model selector, chat/composer, commands, goals, jobs, trajectory, deliverables, document previews, approval, permissions, plugins, and more). The smoke test pins the namespace list, per-namespace key counts, and placeholder signatures so new Harness keys surface as a test failure rather than silently falling back to English.
 
 ## Requirements
 
