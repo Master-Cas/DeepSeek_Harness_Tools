@@ -16,5 +16,15 @@
     "client": {
       "platform": "web"
     }
-  }
+  },
+  "author": {
+    "name": "Master-Cas",
+    "url": "https://github.com/Master-Cas"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Master-Cas/DeepSeek_Harness_Tools.git",
+    "directory": "plugins/deepseek-abyss-theme"
+  },
+  "homepage": "https://github.com/Master-Cas/DeepSeek_Harness_Tools#abyss-theme"
 }
