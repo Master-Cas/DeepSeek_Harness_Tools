@@ -2,10 +2,12 @@
 set -euo pipefail
 
 PROFILE="${DSH_PROFILE:-web}"
+DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
 REPO_URL="https://github.com/Master-Cas/DeepSeek_Harness_Tools.git"
 PACKAGE_NAME="@master-cas/deepseek-spanish"
 PACKAGE_DIR="plugins/deepseek-spanish"
 ACTION="${1:-install}"
+CACHE_DIR="$DSH_HOME_DIR/community-bundles"
 
 run_dsh() {
   if command -v dsh >/dev/null 2>&1; then
@@ -64,8 +66,14 @@ if [[ -z "$TARBALL" ]]; then
   exit 1
 fi
 
+mkdir -p "$CACHE_DIR"
+chmod 700 "$CACHE_DIR"
+PERSISTENT_TARBALL="$CACHE_DIR/$(basename "$TARBALL")"
+cp -f "$TARBALL" "$PERSISTENT_TARBALL"
+chmod 600 "$PERSISTENT_TARBALL"
+
 echo "Installing Spanish language pack into profile '$PROFILE'..."
-run_dsh plugin --profile "$PROFILE" add "$TARBALL"
+run_dsh plugin --profile "$PROFILE" add "$PERSISTENT_TARBALL"
 
 echo
 echo "Spanish language pack installed."
