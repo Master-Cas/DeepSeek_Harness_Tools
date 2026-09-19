@@ -1,0 +1,3 @@
+- insert:
+    - id: master-cas-deepseek-abyss-theme
+      name: '@master-cas/deepseek-abyss-theme'
