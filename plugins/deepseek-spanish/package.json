@@ -1,0 +1,20 @@
+{
+  "name": "@master-cas/deepseek-spanish",
+  "version": "0.1.0",
+  "description": "Spanish language pack for DeepSeek Harness",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}
