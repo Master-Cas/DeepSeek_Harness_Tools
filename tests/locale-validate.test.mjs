@@ -32,6 +32,10 @@ const source = {
   const report = validateCatalogs(source, { namespaces: { common: { ok: 'Aceptar', cancel: 'Cancelar' } } })
   assert.equal(report.pass, false)
   assert.ok(report.errors.some((error) => error.includes('missing namespace "chat"')))
+  assert.equal(report.stats.sourceKeys, 4)
+  assert.equal(report.stats.translated, 2)
+  assert.equal(report.stats.missing, 2)
+  assert.equal(report.stats.coverage, '50.0%')
 }
 
 // Missing key fails.
