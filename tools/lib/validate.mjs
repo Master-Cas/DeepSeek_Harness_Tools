@@ -39,7 +39,7 @@ export function validateCatalogs(source, target, options = {}) {
   const maxExamples = options.maxExamples ?? 25
   const protectedTerms = options.protectedTerms ?? DEFAULT_PROTECTED_TERMS
 
-  let checked = 0
+  let checked = Object.values(src.namespaces).reduce((sum, dict) => sum + Object.keys(dict).length, 0)
   let translated = 0
 
   for (const namespace of sortedKeys(src.namespaces)) {
@@ -48,7 +48,6 @@ export function validateCatalogs(source, target, options = {}) {
       continue
     }
     for (const key of sortedKeys(src.namespaces[namespace])) {
-      checked++
       const sourceValue = src.namespaces[namespace][key]
       const targetValue = tgt.namespaces[namespace][key]
       if (typeof targetValue !== 'string') {
@@ -131,7 +130,7 @@ export function validateCatalogs(source, target, options = {}) {
       targetNamespaces: Object.keys(tgt.namespaces).length,
       sourceKeys: checked,
       translated,
-      missing: details.missingKeys.length + details.missingNamespaces.length,
+      missing: checked - translated,
       extraKeys: details.extraKeys.length,
       coverage: percent(checked === 0 ? 1 : translated / checked),
     },
