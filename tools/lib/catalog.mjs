@@ -165,6 +165,9 @@ export function catalogStats(catalog) {
 
 /** Resolve the canonical catalog path inside a repository. */
 export function catalogPath(root, locale) {
+  if (typeof locale !== 'string' || !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(locale)) {
+    throw new Error('invalid locale identifier')
+  }
   return path.join(root, 'locales', `${locale}.json`)
 }
 
