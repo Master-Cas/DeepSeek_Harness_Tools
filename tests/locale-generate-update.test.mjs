@@ -2,6 +2,7 @@
  * Generation and update tests with in-memory catalogs and a stub translator.
  */
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -54,16 +55,44 @@ const existing = {
     namespaces: { a: { k1: 'Hola {n}' } },
   })
   assert.ok(files['client.js'].includes('addLanguage'))
-  assert.ok(files['client.js'].includes("id: 'xx'"))
+  assert.ok(files['client.js'].includes('id: "xx"'))
   assert.ok(files['client.js'].includes('"a"'))
   const pkg = JSON.parse(files['package.json'])
   assert.equal(pkg.name, 'deepseek-xx')
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
-  assert.ok(files['cordis.patch.yml'].includes(pkg.name))
+  assert.ok(files['cordis.patch.yml'].includes(`name: ${JSON.stringify(pkg.name)}`))
   assert.ok(files['LICENSE'].includes('MASTER-CAS PERSONAL USE LICENSE v1.0'))
   assert.equal(pkg.license, 'SEE LICENSE IN LICENSE')
 }
+
+// User-visible text is serialized, not interpolated into executable syntax.
+{
+  const files = buildPluginFiles({
+    name: '@master-cas/deepseek-zz',
+    id: '@master-cas/deepseek-zz',
+    version: '1.2.3',
+    description: 'safe syntax fixture',
+    locale: 'zz',
+    label: 'Quote \" and newline\nlabel',
+    fallback: 'en',
+    namespaces: { x: { value: 'Line 1\nLine 2 ` ${notCode}' } },
+  })
+  const syntaxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-syntax-'))
+  try {
+    const file = path.join(syntaxDir, 'client.js')
+    fs.writeFileSync(file, files['client.js'])
+    const checked = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
+    assert.equal(checked.status, 0, checked.stderr)
+    assert.ok(files['cordis.patch.yml'].includes('name: \"@master-cas/deepseek-zz\"'))
+  } finally {
+    fs.rmSync(syntaxDir, { recursive: true, force: true })
+  }
+}
+
+assert.throws(() => buildPluginFiles({ name: '../escape', id: '@safe/id', version: '1.0.0', locale: 'xx', label: 'X', fallback: 'en', namespaces: {} }), /invalid package name/)
+assert.throws(() => buildPluginFiles({ name: '@safe/name', id: 'bad\"\\nid', version: '1.0.0', locale: 'xx', label: 'X', fallback: 'en', namespaces: {} }), /invalid plugin id/)
+assert.throws(() => buildPluginFiles({ name: '@safe/name', id: '@safe/id', version: '1.0', locale: 'xx', label: 'X', fallback: 'en', namespaces: {} }), /invalid version/)
 
 // Full generation with a stub translator writes catalog and plugin.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-gen-'))

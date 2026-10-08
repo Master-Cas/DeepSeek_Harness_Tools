@@ -32,7 +32,13 @@ import {
   readJson,
   redact,
   resolveHarness,
+  resolveOutputPath,
   serializeJson,
+  validateLocaleId,
+  validatePackageName,
+  validatePluginId,
+  validateTextField,
+  validateVersion,
 } from '../lib/util.mjs'
 import { formatValidationReport, validateCatalogs } from '../lib/validate.mjs'
 
@@ -156,8 +162,9 @@ async function runScan(argv) {
   const harness = resolveHarness(options.harness)
   const scan = await scanHarness(harness)
   if (options.out) {
-    writeCatalog(options.out, catalogFromScan(scan))
-    log(options, `Wrote ${options.out}`)
+    const output = resolveOutputPath(ROOT, options.out, 'scan output')
+    writeCatalog(output, catalogFromScan(scan))
+    log(options, `Wrote ${output}`)
   }
   if (options.summary) {
     log(
@@ -180,27 +187,32 @@ async function runGenerate(argv) {
   }
   const locale = positionals[0]
   if (!locale) throw new Error('generate requires a <locale> argument')
+  validateLocaleId(locale)
   if (!options.label) throw new Error('generate requires --label')
+  validateTextField(options.label, 'language label')
   if (!options.out && !options['dry-run']) throw new Error('generate requires --out DIR')
 
   const source = await resolveSource(options)
   const existing = existingCatalog(options, locale)
-  const name = options.name ?? `@master-cas/deepseek-${locale}`
+  const name = validatePackageName(options.name ?? `@master-cas/deepseek-${locale}`)
+  const id = validatePluginId(options.id ?? name)
+  const version = validateVersion(options.version ?? '0.1.0')
+  const fallback = validateLocaleId(options.fallback ?? 'en', 'fallback')
   const plugin = {
     name,
-    id: options.id ?? name,
-    version: options.version ?? '0.1.0',
+    id,
+    version,
     description: options.description ?? `${options.label} language pack for DeepSeek Harness`,
-    dir: options.out ? path.resolve(options.out) : undefined,
+    dir: options.out ? resolveOutputPath(ROOT, options.out, 'plugin output') : undefined,
   }
-  const catalogFile = options['save-catalog'] === false ? undefined : options['catalog-out'] ?? catalogPath(ROOT, locale)
+  const catalogFile = options['save-catalog'] === false ? undefined : resolveOutputPath(ROOT, options['catalog-out'] ?? catalogPath(ROOT, locale), 'catalog output')
 
   const result = await generateLanguagePack({
     source,
     existing,
     locale,
     label: options.label,
-    fallback: options.fallback ?? 'en',
+    fallback,
     noTranslate: Boolean(options['no-translate']),
     dryRun: Boolean(options['dry-run']),
     translate: makeTranslateRunner(options, locale),
@@ -229,21 +241,24 @@ async function runUpdate(argv) {
   }
   const locale = positionals[0]
   if (!locale) throw new Error('update requires a <locale> argument')
+  validateLocaleId(locale)
 
   const source = await resolveSource(options)
   const existing = existingCatalog(options, locale)
   if (!existing) throw new Error(`no existing catalog for "${locale}"; run generate first`)
   const label = options.label ?? existing.label ?? locale
-  const catalogFile = options['save-catalog'] === false ? undefined : options['catalog-out'] ?? catalogPath(ROOT, locale)
+  validateTextField(label, 'language label')
+  const fallback = validateLocaleId(options.fallback ?? existing.fallback ?? 'en', 'fallback')
+  const catalogFile = options['save-catalog'] === false ? undefined : resolveOutputPath(ROOT, options['catalog-out'] ?? catalogPath(ROOT, locale), 'catalog output')
 
   let plugin
   if (options.out) {
-    const name = options.name ?? `@master-cas/deepseek-${locale}`
+    const name = validatePackageName(options.name ?? `@master-cas/deepseek-${locale}`)
     plugin = {
-      dir: path.resolve(options.out),
+      dir: resolveOutputPath(ROOT, options.out, 'plugin output'),
       name,
-      id: options.id ?? name,
-      version: options.version ?? '0.1.0',
+      id: validatePluginId(options.id ?? name),
+      version: validateVersion(options.version ?? '0.1.0'),
       description: options.description ?? `${label} language pack for DeepSeek Harness`,
     }
   }
@@ -253,7 +268,7 @@ async function runUpdate(argv) {
     existing,
     locale,
     label,
-    fallback: options.fallback ?? existing.fallback ?? 'en',
+    fallback,
     noTranslate: Boolean(options['no-translate']),
     dryRun: Boolean(options['dry-run']),
     prune: Boolean(options.prune),
@@ -309,6 +324,7 @@ async function runImport(argv) {
   const plugin = catalogFromPlugin(path.resolve(file))
   const locale = options.locale ?? plugin.locale
   if (!locale) throw new Error('cannot infer locale; pass --locale')
+  validateLocaleId(locale)
   const catalog = normalizeCatalog({
     version: 1,
     locale,
@@ -321,11 +337,12 @@ async function runImport(argv) {
   let total = 0
   for (const dictionary of Object.values(catalog.namespaces)) total += Object.keys(dictionary).length
 
-  if (options.out) writeCatalog(options.out, catalog)
-  if (options.json) printJson({ id: plugin.id, locale, namespaces: Object.keys(catalog.namespaces).length, keys: total, placeholders: countNamespacePlaceholders(catalog.namespaces), out: options.out ?? null })
+  const importOutput = options.out ? resolveOutputPath(ROOT, options.out, 'import output') : undefined
+  if (importOutput) writeCatalog(importOutput, catalog)
+  if (options.json) printJson({ id: plugin.id, locale, namespaces: Object.keys(catalog.namespaces).length, keys: total, placeholders: countNamespacePlaceholders(catalog.namespaces), out: importOutput ?? null })
   else {
     log(options, `Imported ${plugin.id}: ${Object.keys(catalog.namespaces).length} namespaces, ${total} keys`)
-    if (options.out) log(options, `Wrote ${options.out}`)
+    if (importOutput) log(options, `Wrote ${importOutput}`)
   }
   return 0
 }
