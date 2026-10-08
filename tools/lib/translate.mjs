@@ -61,7 +61,16 @@ export function resolveApiConfig(options = {}) {
   const apiKey = options.apiKey ?? process.env.DSH_LOCALE_API_KEY ?? process.env.DEEPSEEK_API_KEY
   const apiUrl = options.apiUrl ?? process.env.DSH_LOCALE_API_URL ?? DEFAULT_API_URL
   const model = options.model ?? process.env.DSH_LOCALE_MODEL ?? DEFAULT_MODEL
-  return { apiKey, apiUrl, model }
+  let parsed
+  try {
+    parsed = new URL(apiUrl)
+  } catch {
+    throw new TranslationError('API URL must be an absolute URL')
+  }
+  if (parsed.username || parsed.password) {
+    throw new TranslationError('API URL must not contain embedded credentials')
+  }
+  return { apiKey, apiUrl: parsed.href, model }
 }
 
 /**
@@ -320,6 +329,7 @@ async function callApi({ config, fetchImpl, system, user, requestTimeoutMs = 300
   try {
     response = await fetchImpl(config.apiUrl, {
       method: 'POST',
+      redirect: 'error',
       signal: controller.signal,
       headers: {
         'content-type': 'application/json',

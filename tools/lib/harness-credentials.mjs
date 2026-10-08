@@ -76,7 +76,6 @@ export function credentialsStoreCandidates(options = {}) {
   add(options.dshHome)
   add(process.env.DSH_HOME)
   add(path.join(os.homedir(), '.dsh'))
-  add(options.harness)
   return homes.map((home) => path.join(home, CREDENTIALS_FILENAME))
 }
 
@@ -95,9 +94,6 @@ export function credentialsModuleCandidates(options = {}) {
   const add = (candidate) => {
     if (typeof candidate === 'string' && candidate && !paths.includes(candidate)) paths.push(candidate)
   }
-  if (typeof options.credentialsModule === 'string' && options.credentialsModule.trim()) {
-    return [path.resolve(options.credentialsModule)]
-  }
 
   const roots = []
   const addRoot = (root) => {
@@ -105,23 +101,21 @@ export function credentialsModuleCandidates(options = {}) {
     const resolved = path.resolve(root)
     if (!roots.includes(resolved)) roots.push(resolved)
   }
-  addRoot(options.harness)
-  addRoot(process.env.DSH_HARNESS)
+  // Only DSH homes are trust roots for executable credential parsers. A
+  // checkout supplied via --harness is data and is intentionally excluded.
   addRoot(options.dshHome)
   addRoot(process.env.DSH_HOME)
   addRoot(path.join(os.homedir(), '.dsh'))
 
   for (const root of roots) {
-    // A lightweight installation: every `@deepseek-ai` scope reachable from it.
     const detected = detectHarnessMode(root)
-    if (detected?.mode === 'installed') {
-      for (const scope of detected.scopeRoots ?? []) add(path.join(scope, CREDENTIALS_PACKAGE))
-    }
-    // A source checkout: the workspace package plus any installed copy.
-    add(path.join(root, 'packages', 'credentials', 'credentials-local', 'lib', 'index.js'))
-    add(path.join(root, 'node_modules', CREDENTIALS_SCOPE, CREDENTIALS_PACKAGE))
-    add(path.join(root, 'node_modules', '.pnpm', 'node_modules', CREDENTIALS_SCOPE, CREDENTIALS_PACKAGE))
-    add(path.join(root, 'profiles', 'node_modules', CREDENTIALS_SCOPE, CREDENTIALS_PACKAGE))
+    if (detected?.mode !== 'installed') continue
+    for (const scope of detected.scopeRoots ?? []) add(path.join(scope, CREDENTIALS_PACKAGE))
+  }
+
+  if (typeof options.credentialsModule === 'string' && options.credentialsModule.trim()) {
+    const explicit = path.resolve(options.credentialsModule)
+    return paths.some((candidate) => path.resolve(candidate) === explicit) ? [explicit] : []
   }
   return paths
 }

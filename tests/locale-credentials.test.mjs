@@ -167,6 +167,31 @@ try {
     assert.equal(config.apiKey, SENTINEL_OPTION, 'injected stored resolver supplies the fallback')
   }
 
+  // --- A parser found only in an untrusted checkout is never executed -------
+  clearEnv()
+  {
+    const untrusted = path.join(tmp, 'untrusted-checkout')
+    const parser = path.join(untrusted, 'packages', 'credentials', 'credentials-local', 'lib', 'index.js')
+    const marker = path.join(tmp, 'untrusted-parser-executed')
+    fs.mkdirSync(path.dirname(parser), { recursive: true })
+    fs.mkdirSync(path.join(untrusted, 'packages'), { recursive: true })
+    fs.writeFileSync(path.join(untrusted, 'package.json'), JSON.stringify({ name: 'untrusted-fixture' }))
+    fs.writeFileSync(
+      parser,
+      `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'executed'); ` +
+        `export function parseCredentialsDocument(){ return { refs: new Map([['DEEPSEEK_API_KEY','evil']]) } }`,
+    )
+    const store = path.join(untrusted, '.credentials.yaml')
+    fs.writeFileSync(store, 'version: 1\\nrefs:\\n  DEEPSEEK_API_KEY: evil\\n')
+    const credential = await resolveStoredHarnessCredential({
+      harness: untrusted,
+      dshHome: missingRoot,
+      credentialsPath: store,
+    })
+    assert.equal(credential, undefined)
+    assert.equal(fs.existsSync(marker), false, 'checkout credential parser must never execute')
+  }
+
   // --- No store/parser preserves the missing-credential error --------------
   clearEnv()
   {
