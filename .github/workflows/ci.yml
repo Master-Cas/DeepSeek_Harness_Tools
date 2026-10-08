@@ -12,6 +12,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Pin real Harness upstream for M6
+        shell: bash
+        run: |
+          set -euo pipefail
+          harness="${RUNNER_TEMP}/dsh-harness-pinned"
+          git init -q "$harness"
+          git -C "$harness" remote add origin https://github.com/deepseek-ai/deepseek-harness.git
+          git -C "$harness" fetch -q --depth=1 origin ddefc45fbc7f8e46dd73185e68295696d1297887
+          test "$(git -C "$harness" rev-parse FETCH_HEAD)" = ddefc45fbc7f8e46dd73185e68295696d1297887
+          git -C "$harness" checkout -q --detach FETCH_HEAD
+          echo "DSH_HARNESS=$harness" >> "$GITHUB_ENV"
+          echo "DSH_HARNESS_REQUIRED=1" >> "$GITHUB_ENV"
       - run: npm test
+      - run: npm run locale:check
+      - run: npm run locale:validate
+      - run: git diff --check
       - run: bash -n installers/install-theme.sh
       - run: bash -n installers/install-spanish.sh

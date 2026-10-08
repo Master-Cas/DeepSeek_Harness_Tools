@@ -61,6 +61,26 @@ assert.equal(fixture.namespaces.delta.two, 'two {x}')
   }
 }
 
+// The pinned 0.1.6-alpha.2 runtime uses a named re-export for common.en.
+{
+  const dir = fs.mkdtempSync(path.join(root, '.tmp-locale-reexport-'))
+  try {
+    const file = path.join(dir, 'registry.ts')
+    const locales = path.join(dir, 'locales')
+    fs.mkdirSync(locales)
+    fs.writeFileSync(file, "import { en } from './locales/index.ts'\n")
+    fs.writeFileSync(path.join(locales, 'index.ts'), "export { en } from './en.ts'\n")
+    fs.writeFileSync(path.join(locales, 'en.ts'), "export const en = { greeting: 'Hello' }\n")
+    const { loadImportedExport } = await import('../tools/lib/harness-scan.mjs')
+    assert.deepEqual(
+      await loadImportedExport(file, { source: './locales/index.ts', imported: 'en' }),
+      { greeting: 'Hello' },
+    )
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 // Guard the implementation itself against reintroducing source execution.
 {
   const scannerSource = fs.readFileSync(path.join(root, 'tools', 'lib', 'harness-scan.mjs'), 'utf8')
@@ -70,7 +90,10 @@ assert.equal(fixture.namespaces.delta.two, 'two {x}')
 
 const HARNESS = process.env.DSH_HARNESS ?? '/home/ubuntu/deepseek-harness'
 if (!fs.existsSync(path.join(HARNESS, 'package.json'))) {
-  console.log(`scanner tests: fixture PASS; real harness not found at ${HARNESS} (skipped)`)
+  if (process.env.DSH_HARNESS_REQUIRED === '1') {
+    throw new Error(`M6 real Harness checkout required but missing at ${HARNESS}`)
+  }
+  console.log(`scanner tests: fixture PASS; real harness not found at ${HARNESS} (SKIPPED)`)
 } else {
   const scan = await scanHarness(HARNESS)
   assert.equal(scan.mode, 'source', 'real harness mode')

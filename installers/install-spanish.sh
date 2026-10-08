@@ -4,9 +4,19 @@ set -euo pipefail
 PROFILE="${DSH_PROFILE:-web}"
 DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
 REPO_URL="https://github.com/Master-Cas/DeepSeek_Harness_Tools.git"
+# Immutable source revision for the v0.3.0 plugin packages.
+REPO_COMMIT="e6564b1ce42adae310b15372aaf980e4059eb389"
 PACKAGE_NAME="@master-cas/deepseek-spanish"
 PACKAGE_DIR="plugins/deepseek-spanish"
 ACTION="${1:-install}"
+if [[ "$ACTION" != "install" && "$ACTION" != "--uninstall" ]]; then
+  echo "ERROR: action must be install or --uninstall" >&2
+  exit 2
+fi
+if [[ ! "$PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+  echo "ERROR: invalid DSH_PROFILE" >&2
+  exit 2
+fi
 CACHE_DIR="$DSH_HOME_DIR/community-bundles"
 
 run_dsh() {
@@ -56,7 +66,14 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-git clone --quiet --depth=1 "$REPO_URL" "$TMP/tools"
+git -C "$TMP" init -q tools
+git -C "$TMP/tools" remote add origin "$REPO_URL"
+git -C "$TMP/tools" fetch -q --depth=1 origin "$REPO_COMMIT"
+test "$(git -C "$TMP/tools" rev-parse FETCH_HEAD)" = "$REPO_COMMIT" || {
+  echo "ERROR: fetched commit does not match pin" >&2
+  exit 1
+}
+git -C "$TMP/tools" checkout -q --detach "$REPO_COMMIT"
 PKG="$TMP/tools/$PACKAGE_DIR"
 pack_plugin "$PKG" "$TMP"
 
@@ -66,11 +83,25 @@ if [[ -z "$TARBALL" ]]; then
   exit 1
 fi
 
-mkdir -p "$CACHE_DIR"
-chmod 700 "$CACHE_DIR"
+# Never overwrite a pre-existing bundle or traverse a symlinked cache path.
+if [[ -L "$CACHE_DIR" ]]; then
+  echo "ERROR: refusing symlinked bundle cache" >&2
+  exit 1
+fi
+mkdir -p -m 700 "$CACHE_DIR"
+if [[ ! -d "$CACHE_DIR" || -L "$CACHE_DIR" ]]; then
+  echo "ERROR: unsafe bundle cache" >&2
+  exit 1
+fi
 PERSISTENT_TARBALL="$CACHE_DIR/$(basename "$TARBALL")"
-cp -f "$TARBALL" "$PERSISTENT_TARBALL"
-chmod 600 "$PERSISTENT_TARBALL"
+if [[ -e "$PERSISTENT_TARBALL" || -L "$PERSISTENT_TARBALL" ]]; then
+  if [[ ! -f "$PERSISTENT_TARBALL" || -L "$PERSISTENT_TARBALL" ]] || ! cmp -s "$TARBALL" "$PERSISTENT_TARBALL"; then
+    echo "ERROR: an existing bundle differs; refusing to overwrite" >&2
+    exit 1
+  fi
+else
+  (umask 077; cp -n "$TARBALL" "$PERSISTENT_TARBALL")
+fi
 
 echo "Installing Spanish language pack into profile '$PROFILE'..."
 run_dsh plugin --profile "$PROFILE" add "$PERSISTENT_TARBALL"

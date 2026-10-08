@@ -78,6 +78,27 @@ DSH_ROOT=$HOME/deepseek-harness DSH_PROFILE=web \
 
 The scripts detect either a global `dsh` CLI or a source checkout runnable with `pnpm dsh`.
 
+### Reproducible installer sources (M6)
+
+Both installers pin the v0.3.0 plugin source to commit
+e6564b1ce42adae310b15372aaf980e4059eb389 of this repository.
+They fetch that SHA, verify the fetched commit, and refuse to overwrite a
+pre-existing bundle archive with different bytes. To upgrade the plugin source,
+review the candidate commit, run the installer simulations and locale gates,
+then update REPO_COMMIT in both installers in a reviewed PR. Do not
+change the pin to main or an unverified tag.
+
+M6 CI independently pins upstream Harness 0.1.6-alpha.2 to
+ddefc45fbc7f8e46dd73185e68295696d1297887
+(dsh-v0.1.6-alpha.2), downloads that source into an isolated runner
+directory, and runs the static scanner without executing the upstream files.
+DSH_HARNESS_REQUIRED=1 causes the test to FAIL if this checkout is absent;
+without it, the optional local real-Harness check reports SKIPPED.
+To update upstream Harness, first confirm the release tag resolves to the
+candidate SHA, then update the CI pin and the scanner acceptance fixtures only
+after reviewing any namespace/key differences. Never run these integration
+checks against the live VPS.
+
 ## Uninstall
 
 ```bash

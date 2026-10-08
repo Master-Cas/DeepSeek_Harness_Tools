@@ -113,6 +113,7 @@ function moduleCandidates(sourceFile, specifier) {
     candidates.push(base)
   } else {
     for (const ext of ['.ts', '.tsx', '.js']) candidates.push(base + ext)
+    for (const ext of ['.ts', '.tsx', '.js']) candidates.push(path.join(base, 'index' + ext))
     candidates.push(...compiledCandidates(`${base}.ts`))
   }
   const seen = new Set()
@@ -149,6 +150,20 @@ export async function loadImportedExport(sourceFile, spec, seen = new Set()) {
       }
       const value = evaluateStatic(spec.imported, symbols)
       if (value !== undefined) return value
+      // Re-exported locale dictionaries are data, not executable modules.
+      // Follow only a literal named re-export and retain the cycle guard.
+      const reexports = /export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g
+      for (const match of text.matchAll(reexports)) {
+        for (const raw of match[1].split(',')) {
+          const piece = raw.trim().match(/^([\w$]+)(?:\s+as\s+([\w$]+))?$/)
+          if (!piece || (piece[2] || piece[1]) !== spec.imported) continue
+          try {
+            return await loadImportedExport(resolved, { source: match[2], imported: piece[1] }, nextSeen)
+          } catch {
+            // Another candidate can still provide the requested export.
+          }
+        }
+      }
     } catch {
       // Try the next source/compiled candidate.
     }
