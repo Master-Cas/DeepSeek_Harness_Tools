@@ -6,7 +6,7 @@
 
 import path from 'node:path'
 import { CATALOG_VERSION, normalizeCatalog, writeCatalog } from './catalog.mjs'
-import { buildPluginFiles, planTranslationMemory, writePluginFiles } from './generate.mjs'
+import { buildPluginFiles, buildTranslationMeta, planTranslationMemory, writePluginFiles } from './generate.mjs'
 import { computeCoverage, percent, sortedKeys } from './util.mjs'
 
 /** Structural diff between the current source and an existing target. */
@@ -62,8 +62,10 @@ export async function updateLanguagePack(options) {
   const source = normalizeCatalog(options.source)
   const existing = normalizeCatalog(options.existing ?? { namespaces: {} })
   const diff = diffCatalog(source, existing)
-  const { reused, pending } = planTranslationMemory(source, existing)
+  const { reused, pending, sourceHashes, modified, legacyUnverified } = planTranslationMemory(source, existing)
   const warnings = []
+  if (modified.length) warnings.push(`${modified.length} translation(s) invalidated because the English source changed`)
+  if (legacyUnverified.length) warnings.push(`${legacyUnverified.length} legacy translation(s) reused without historical source hashes`)
 
   const report = {
     dryRun: Boolean(options.dryRun),
@@ -73,6 +75,8 @@ export async function updateLanguagePack(options) {
     shared: diff.shared.length,
     reused: Object.values(reused).reduce((sum, dict) => sum + Object.keys(dict).length, 0),
     pending: pending.length,
+    modified: modified.length,
+    legacyReused: legacyUnverified.length,
     addedNamespaces: diff.addedNamespaces,
     removedNamespaces: diff.removedNamespaces,
     obsolete: diff.removed,
@@ -140,6 +144,7 @@ export async function updateLanguagePack(options) {
     fallback: options.fallback ?? 'en',
     source: options.sourceRef ?? 'locales/source-en.json',
     namespaces: ordered,
+    meta: buildTranslationMeta(existing, sourceHashes, legacyUnverified),
   }
 
   if (options.catalogFile) writeCatalog(options.catalogFile, catalog)

@@ -7,7 +7,7 @@
 import { normalizeCatalog } from './catalog.mjs'
 import { comparePlaceholders } from './placeholders.mjs'
 import { DEFAULT_PROTECTED_TERMS, findProtectedViolations } from './translate.mjs'
-import { percent, sortedKeys } from './util.mjs'
+import { hash, percent, sortedKeys } from './util.mjs'
 
 /**
  * Validate a target catalog against its source.
@@ -21,6 +21,15 @@ import { percent, sortedKeys } from './util.mjs'
  * @param {number} [options.maxExamples] examples per error category.
  * @returns {{ pass: boolean, errors: string[], warnings: string[], stats: object, details: object }}
  */
+function legitimateIdenticalSource(value, protectedTerms) {
+  const text = String(value ?? '').trim()
+  if (!text) return false
+  if (protectedTerms.includes(text)) return true
+  if (/^--?[A-Za-z0-9][A-Za-z0-9._-]*$/.test(text)) return true
+  if (/^(?:https?:\/\/|[A-Za-z]:\\|\/)[^\s]+$/.test(text)) return true
+  return false
+}
+
 export function validateCatalogs(source, target, options = {}) {
   const src = normalizeCatalog(source)
   const tgt = normalizeCatalog(target)
@@ -35,9 +44,13 @@ export function validateCatalogs(source, target, options = {}) {
     emptyTranslations: [],
     untranslated: [],
     protectedViolations: [],
+    staleTranslations: [],
+    unverifiedSourceHashes: [],
   }
   const maxExamples = options.maxExamples ?? 25
   const protectedTerms = options.protectedTerms ?? DEFAULT_PROTECTED_TERMS
+  const sourceHashes = tgt.meta?.sourceHashes ?? {}
+  const legacyUnverified = new Set(tgt.meta?.legacyUnverified ?? [])
 
   let checked = Object.values(src.namespaces).reduce((sum, dict) => sum + Object.keys(dict).length, 0)
   let translated = 0
@@ -59,6 +72,14 @@ export function validateCatalogs(source, target, options = {}) {
         continue
       }
       translated++
+      const sourceId = `${namespace}\u0000${key}`
+      const recordedHash = sourceHashes?.[namespace]?.[key]
+      const currentHash = hash(String(sourceValue))
+      if (typeof recordedHash === 'string' && recordedHash !== currentHash) {
+        details.staleTranslations.push(`${namespace}.${key}`)
+      } else if (typeof recordedHash !== 'string' || legacyUnverified.has(sourceId)) {
+        details.unverifiedSourceHashes.push(`${namespace}.${key}`)
+      }
       const placeholders = comparePlaceholders(sourceValue, targetValue)
       if (!placeholders.ok) {
         const parts = []
@@ -66,7 +87,9 @@ export function validateCatalogs(source, target, options = {}) {
         if (placeholders.extra.length) parts.push(`extra ${placeholders.extra.join(', ')}`)
         details.placeholderMismatches.push({ key: `${namespace}.${key}`, detail: parts.join('; ') })
       }
-      if (sourceValue === targetValue) details.untranslated.push(`${namespace}.${key}`)
+      if (sourceValue === targetValue && !legitimateIdenticalSource(sourceValue, protectedTerms)) {
+        details.untranslated.push(`${namespace}.${key}`)
+      }
       if (options.checkProtected) {
         const violations = findProtectedViolations(sourceValue, targetValue, protectedTerms)
         if (violations.length) {
@@ -91,6 +114,10 @@ export function validateCatalogs(source, target, options = {}) {
   for (const key of details.emptyTranslations) errors.push(`empty translation "${key}"`)
   for (const entry of details.placeholderMismatches) {
     errors.push(`placeholder mismatch "${entry.key}": ${entry.detail}`)
+  }
+  for (const key of details.staleTranslations) errors.push(`stale translation "${key}": English source changed`)
+  if (details.unverifiedSourceHashes.length) {
+    warnings.push(`${details.unverifiedSourceHashes.length} translation(s) have no verified historical source hash`)
   }
 
   for (const namespace of details.extraNamespaces) {
@@ -124,6 +151,8 @@ export function validateCatalogs(source, target, options = {}) {
       emptyTranslations: limit(details.emptyTranslations),
       untranslated: limit(details.untranslated),
       protectedViolations: limit(details.protectedViolations),
+      staleTranslations: limit(details.staleTranslations),
+      unverifiedSourceHashes: limit(details.unverifiedSourceHashes),
     },
     stats: {
       sourceNamespaces: Object.keys(src.namespaces).length,

@@ -9,6 +9,7 @@ import path from 'node:path'
 import { CATALOG_VERSION, normalizeCatalog, writeCatalog } from './catalog.mjs'
 import { comparePlaceholders } from './placeholders.mjs'
 import {
+  hash,
   percent,
   sortedKeys,
   validateLocaleId,
@@ -168,35 +169,82 @@ export function writePluginFiles(dir, files) {
   return dir
 }
 
-/**
- * Compute which source keys still need a translation.
- * Existing translations are reused when non-empty and placeholder-safe.
- */
-export function planTranslationMemory(source, existing) {
-  const existingCatalog = existing ? normalizeCatalog(existing) : { namespaces: {} }
-  const reused = {}
-  const pending = []
+/** Deterministic SHA-256 identity for one English source string. */
+export function sourceEntryHash(value) {
+  return hash(String(value))
+}
 
-  for (const namespace of sortedKeys(source.namespaces)) {
-    reused[namespace] = {}
-    for (const key of sortedKeys(source.namespaces[namespace])) {
-      const value = existingCatalog.namespaces?.[namespace]?.[key]
-      if (typeof value === 'string' && value !== '') {
-        const placeholders = comparePlaceholders(source.namespaces[namespace][key], value)
-        if (placeholders.ok) {
-          reused[namespace][key] = value
-          continue
-        }
-      }
-      pending.push({
-        id: `${namespace}\u0000${key}`,
-        namespace,
-        key,
-        text: source.namespaces[namespace][key],
-      })
+/** Hash every current source entry using a stable namespace/key ordering. */
+export function buildSourceHashes(source) {
+  const normalized = normalizeCatalog(source)
+  const hashes = {}
+  for (const namespace of sortedKeys(normalized.namespaces)) {
+    hashes[namespace] = {}
+    for (const key of sortedKeys(normalized.namespaces[namespace])) {
+      hashes[namespace][key] = sourceEntryHash(normalized.namespaces[namespace][key])
     }
   }
-  return { reused, pending }
+  return hashes
+}
+
+/** Metadata persisted with target catalogs so reuse is verifiable. */
+export function buildTranslationMeta(existing, sourceHashes, legacyUnverified = []) {
+  const prior = existing ? normalizeCatalog(existing).meta : {}
+  const meta = { ...prior }
+  delete meta.sourceHashes
+  delete meta.sourceHashAlgorithm
+  delete meta.legacyUnverified
+  meta.sourceHashAlgorithm = 'sha256'
+  meta.sourceHashes = sourceHashes
+  if (legacyUnverified.length) meta.legacyUnverified = [...legacyUnverified].sort()
+  return meta
+}
+
+/**
+ * Compute which source keys still need a translation.
+ * Existing translations are reusable only when placeholders are valid and a
+ * stored source hash still matches. Pre-hash catalogs are migrated without a
+ * mass retranslation, but every such reuse remains explicitly marked legacy.
+ */
+export function planTranslationMemory(source, existing) {
+  const src = normalizeCatalog(source)
+  const existingCatalog = existing ? normalizeCatalog(existing) : { namespaces: {}, meta: {} }
+  const sourceHashes = buildSourceHashes(src)
+  const priorHashes = existingCatalog.meta?.sourceHashes ?? {}
+  const priorLegacy = new Set(existingCatalog.meta?.legacyUnverified ?? [])
+  const reused = {}
+  const pending = []
+  const modified = []
+  const legacyUnverified = []
+
+  for (const namespace of sortedKeys(src.namespaces)) {
+    reused[namespace] = {}
+    for (const key of sortedKeys(src.namespaces[namespace])) {
+      const id = `${namespace}\u0000${key}`
+      const text = src.namespaces[namespace][key]
+      const value = existingCatalog.namespaces?.[namespace]?.[key]
+      const currentHash = sourceHashes[namespace][key]
+      const priorHash = priorHashes?.[namespace]?.[key]
+      if (typeof value === 'string' && value !== '') {
+        if (typeof priorHash === 'string' && priorHash !== currentHash) {
+          const entry = { id, namespace, key, text, reason: 'source-changed', priorHash, currentHash }
+          modified.push(entry)
+          pending.push(entry)
+          continue
+        }
+        const placeholders = comparePlaceholders(text, value)
+        if (placeholders.ok) {
+          reused[namespace][key] = value
+          if (typeof priorHash !== 'string' || priorLegacy.has(id)) legacyUnverified.push(id)
+          continue
+        }
+        pending.push({ id, namespace, key, text, reason: 'placeholder-mismatch' })
+        continue
+      }
+      pending.push({ id, namespace, key, text, reason: value === '' ? 'empty' : 'missing' })
+    }
+  }
+  return { reused, pending, sourceHashes, modified, legacyUnverified }
 }
 
 /**
@@ -217,8 +265,10 @@ export function planTranslationMemory(source, existing) {
  */
 export async function generateLanguagePack(options) {
   const source = normalizeCatalog(options.source)
-  const { reused, pending } = planTranslationMemory(source, options.existing)
+  const { reused, pending, sourceHashes, modified, legacyUnverified } = planTranslationMemory(source, options.existing)
   const warnings = []
+  if (modified.length) warnings.push(`${modified.length} translation(s) invalidated because the English source changed`)
+  if (legacyUnverified.length) warnings.push(`${legacyUnverified.length} legacy translation(s) reused without historical source hashes`)
 
   if (options.dryRun) {
     return {
@@ -230,6 +280,8 @@ export async function generateLanguagePack(options) {
       sources: source,
       reusedNamespaces: reused,
       pendingEntries: pending,
+      modified: modified.length,
+      legacyReused: legacyUnverified.length,
       warnings,
     }
   }
@@ -273,6 +325,7 @@ export async function generateLanguagePack(options) {
     fallback: options.fallback ?? 'en',
     source: options.sourceRef ?? 'locales/source-en.json',
     namespaces,
+    meta: buildTranslationMeta(options.existing, sourceHashes, legacyUnverified),
   }
 
   const files = buildPluginFiles({
@@ -302,6 +355,8 @@ export async function generateLanguagePack(options) {
     pluginDir,
     reused: Object.values(reused).reduce((sum, dict) => sum + Object.keys(dict).length, 0),
     translated: pending.length,
+    modified: modified.length,
+    legacyReused: legacyUnverified.length,
     pending: 0,
     coverage: percent(1),
     warnings,

@@ -9,6 +9,7 @@ import path from 'node:path'
 import { catalogFromPlugin, loadCatalog, writeCatalog } from '../tools/lib/catalog.mjs'
 import {
   buildPluginFiles,
+  buildSourceHashes,
   generateLanguagePack,
   planTranslationMemory,
 } from '../tools/lib/generate.mjs'
@@ -40,6 +41,34 @@ const existing = {
   const plan = planTranslationMemory(source, broken)
   assert.equal(plan.reused.a?.k1, undefined)
   assert.ok(plan.pending.some((entry) => entry.key === 'k1'))
+}
+
+// Source hashes invalidate reuse when English meaning or placeholders change.
+{
+  const oldSource = { namespaces: { a: { k1: 'Hello {n}' } } }
+  const hashed = {
+    namespaces: { a: { k1: 'Hola {n}' } },
+    meta: { sourceHashAlgorithm: 'sha256', sourceHashes: buildSourceHashes(oldSource) },
+  }
+
+  const meaningChanged = planTranslationMemory({ namespaces: { a: { k1: 'Welcome {n}' } } }, hashed)
+  assert.equal(meaningChanged.reused.a.k1, undefined)
+  assert.equal(meaningChanged.pending[0].reason, 'source-changed')
+  assert.equal(meaningChanged.modified.length, 1)
+
+  const placeholderChanged = planTranslationMemory({ namespaces: { a: { k1: 'Hello {name}' } } }, hashed)
+  assert.equal(placeholderChanged.pending[0].reason, 'source-changed')
+  assert.equal(placeholderChanged.modified.length, 1)
+}
+
+// Empty values are never reusable, while pre-hash catalogs migrate explicitly.
+{
+  const empty = planTranslationMemory(source, { namespaces: { a: { k1: '' } } })
+  assert.equal(empty.pending.find((entry) => entry.key === 'k1').reason, 'empty')
+
+  const legacy = planTranslationMemory(source, existing)
+  assert.equal(legacy.legacyUnverified.includes('a\u0000k1'), true)
+  assert.equal(legacy.reused.a.k1, 'Hola {n}')
 }
 
 // buildPluginFiles emits a loadable Harness bundle.
@@ -114,11 +143,15 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-gen-'))
     catalogFile: path.join(dir, 'xx.json'),
   })
   assert.equal(result.reused, 1)
+  assert.equal(result.legacyReused, 1)
   assert.equal(result.translated, 2)
   assert.deepEqual(seen.sort(), ['a\u0000k2', 'b\u0000z'])
   assert.equal(result.catalog.namespaces.a.k1, 'Hola {n}')
   assert.equal(result.catalog.namespaces.a.k2, '[xx] Bye')
   assert.equal(result.catalog.namespaces.b.z, '[xx] Zed')
+  assert.equal(result.catalog.meta.sourceHashAlgorithm, 'sha256')
+  assert.equal(result.catalog.meta.sourceHashes.a.k1, buildSourceHashes(source).a.k1)
+  assert.ok(result.catalog.meta.legacyUnverified.includes('a\u0000k1'))
   assert.ok(fs.existsSync(path.join(dir, 'plugin', 'client.js')))
   assert.ok(fs.existsSync(path.join(dir, 'plugin', 'package.json')))
 
@@ -209,6 +242,19 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-gen-'))
   assert.equal(dry.dryRun, true)
   assert.equal(dry.added, 1)
   assert.equal(dry.coverage.ratio > 0, true)
+
+
+  // Once a hashed catalog is current, repeating the update is a no-op.
+  const repeat = await updateLanguagePack({
+    source: nextSource,
+    existing: pruned.catalog,
+    locale: 'xx',
+    label: 'Testish',
+    noTranslate: true,
+  })
+  assert.equal(repeat.modified, 0)
+  assert.equal(repeat.pending, 0)
+  assert.equal(repeat.reused, 3)
 }
 
 fs.rmSync(dir, { recursive: true, force: true })
