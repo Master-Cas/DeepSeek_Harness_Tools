@@ -132,6 +132,24 @@ try {
     assert.equal(stored.apiKey, SENTINEL_STORE, 'the stored credential is the last resort')
   }
 
+  // --- Stored keys never reach non-official destinations ------------------
+  clearEnv()
+  {
+    await assert.rejects(
+      resolveApiConfigAsync({ harness: credsFixture, dshHome: credsFixture,
+        apiUrl: 'http://127.0.0.1:1/v1/chat/completions' }),
+      /stored Harness credential cannot be used with a custom API endpoint/,
+    )
+    await assert.rejects(
+      resolveApiConfigAsync({ harness: credsFixture, dshHome: credsFixture,
+        apiUrl: 'https://api.deepseek.com.attacker.invalid/v1/chat/completions' }),
+      /stored Harness credential cannot be used with a custom API endpoint/,
+    )
+    const explicit = await resolveApiConfigAsync({ apiKey: SENTINEL_OPTION,
+      apiUrl: 'http://127.0.0.1:1/v1/chat/completions', harness: credsFixture, dshHome: credsFixture })
+    assert.equal(explicit.apiKey, SENTINEL_OPTION, 'explicit custom-endpoint key remains supported')
+  }
+
   // --- Injectable resolver (priority without touching disk) ----------------
   clearEnv()
   {
