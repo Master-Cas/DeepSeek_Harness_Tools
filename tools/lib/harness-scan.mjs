@@ -6,10 +6,8 @@
  *
  *   - **source** (a checkout with `package.json` + `packages/`): walks the
  *     TypeScript source, finds every `ctx.locale.register(...)` call, resolves
- *     the namespace and dictionary expressions, and imports the dictionary
- *     module so values and placeholders are exact. The source `.ts` modules
- *     are preferred (Node >= 22.6 strips TypeScript types), with the compiled
- *     `lib/types/**` ESM as a fallback.
+ *     namespace and dictionary expressions as inert source text. Named imports
+ *     are followed recursively and statically; no inspected module is loaded.
  *   - **installed** (a lightweight `~/.dsh` tree with an `@deepseek-ai` scope):
  *     reads published `@deepseek-ai/<pkg>/lib/client.js` bundles *statically*
  *     (they reference the browser runtime and must not be executed), see
@@ -25,11 +23,17 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { detectHarnessMode } from './harness-detect.mjs'
 import { scanInstalledHarness } from './installed-scan.mjs'
 import { countNamespacePlaceholders } from './placeholders.mjs'
-import { extractBalanced, findRegisterCalls, splitTopLevel } from './static-js.mjs'
+import {
+  collectDeclarations,
+  evaluateStatic,
+  extractBalanced,
+  findRegisterCalls,
+  splitTopLevel,
+  stripComments,
+} from './static-js.mjs'
 import { hash, sortedKeys } from './util.mjs'
 
 // Keep the historical helper exports available from this module too.
@@ -109,6 +113,7 @@ function moduleCandidates(sourceFile, specifier) {
     candidates.push(base)
   } else {
     for (const ext of ['.ts', '.tsx', '.js']) candidates.push(base + ext)
+    for (const ext of ['.ts', '.tsx', '.js']) candidates.push(path.join(base, 'index' + ext))
     candidates.push(...compiledCandidates(`${base}.ts`))
   }
   const seen = new Set()
@@ -119,86 +124,112 @@ function moduleCandidates(sourceFile, specifier) {
   })
 }
 
-const moduleCache = new Map()
-
-/** Import a module with caching. */
-async function importModule(file) {
-  if (!moduleCache.has(file)) {
-    moduleCache.set(file, import(pathToFileURL(file).href))
-  }
-  return moduleCache.get(file)
-}
-
-/** Load one named export through the import map, source first then compiled. */
-export async function loadImportedExport(sourceFile, spec) {
+/**
+ * Resolve a named export by reading candidate modules as text. Imported names
+ * are recursively reduced to JSON literals before the requested export is
+ * evaluated. Nothing from the checkout is imported or executed.
+ */
+export async function loadImportedExport(sourceFile, spec, seen = new Set()) {
   for (const candidate of moduleCandidates(sourceFile, spec.source)) {
+    const resolved = path.resolve(candidate)
+    if (seen.has(resolved)) continue
+    const nextSeen = new Set(seen)
+    nextSeen.add(resolved)
     try {
-      const module = await importModule(candidate)
-      if (spec.imported in module) return module[spec.imported]
+      const text = stripComments(fs.readFileSync(resolved, 'utf8'))
+      const symbols = collectDeclarations(text)
+      const imports = parseImportMap(text)
+      for (const [local, nested] of imports) {
+        try {
+          const value = await loadImportedExport(resolved, nested, nextSeen)
+          if (value !== undefined) symbols.set(local, JSON.stringify(value))
+        } catch {
+          // Unused or unsupported imports do not make a static module unsafe;
+          // the requested export below must still resolve completely.
+        }
+      }
+      const value = evaluateStatic(spec.imported, symbols)
+      if (value !== undefined) return value
+      // Re-exported locale dictionaries are data, not executable modules.
+      // Follow only a literal named re-export and retain the cycle guard.
+      const reexports = /export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g
+      for (const match of text.matchAll(reexports)) {
+        for (const raw of match[1].split(',')) {
+          const piece = raw.trim().match(/^([\w$]+)(?:\s+as\s+([\w$]+))?$/)
+          if (!piece || (piece[2] || piece[1]) !== spec.imported) continue
+          try {
+            return await loadImportedExport(resolved, { source: match[2], imported: piece[1] }, nextSeen)
+          } catch {
+            // Another candidate can still provide the requested export.
+          }
+        }
+      }
     } catch {
-      // Try the next candidate (source TypeScript may be unavailable).
+      // Try the next source/compiled candidate.
     }
   }
-  throw new Error(`cannot resolve ${spec.imported} from "${spec.source}" in ${sourceFile}`)
+  throw new Error(`cannot statically resolve ${spec.imported} from \"${spec.source}\" in ${sourceFile}`)
 }
 
-/** Safely evaluate a plain JS object/array literal extracted from source. */
-function evaluateLiteral(text) {
-  // Literals come from the scanner's balanced extraction; disable scope access.
-  // eslint-disable-next-line no-new-func
-  const factory = new Function(`"use strict"; return (${text});`)
-  return factory()
+/** Populate imported identifiers with inert JSON literals when resolvable. */
+async function collectSourceSymbols(sourceFile, text) {
+  const symbols = collectDeclarations(text)
+  const imports = parseImportMap(text)
+  for (const [local, spec] of imports) {
+    try {
+      const value = await loadImportedExport(sourceFile, spec, new Set([path.resolve(sourceFile)]))
+      if (value !== undefined) symbols.set(local, JSON.stringify(value))
+    } catch {
+      // Resolution is demanded only if a registration actually references it.
+    }
+  }
+  return { symbols, imports }
+}
+
+/** Resolve a dictionary expression to plain data without evaluating code. */
+async function resolveDictionary(sourceFile, valueText, imports, symbols) {
+  const text = valueText.trim()
+  const local = evaluateStatic(text, symbols)
+  if (local && typeof local === 'object' && !Array.isArray(local)) return local
+  if (/^[A-Za-z_$][\w$]*$/.test(text) && imports.has(text)) {
+    const imported = await loadImportedExport(sourceFile, imports.get(text))
+    if (imported && typeof imported === 'object' && !Array.isArray(imported)) return imported
+  }
+  throw new Error(`cannot statically resolve dictionary expression \"${text}\" in ${sourceFile}`)
 }
 
 /** Resolve the `en` property of a register options object. */
-async function resolveDictionary(sourceFile, valueText, imports, consts) {
-  const text = valueText.trim()
-  if (text.startsWith('{')) return evaluateLiteral(text)
-  if (/^[A-Za-z_$][\w$]*$/.test(text)) {
-    if (imports.has(text)) return loadImportedExport(sourceFile, imports.get(text))
-    if (consts.has(text)) {
-      const raw = consts.get(text)
-      return raw.startsWith('{') ? evaluateLiteral(raw) : raw
-    }
-    throw new Error(`cannot resolve dictionary identifier "${text}" in ${sourceFile}`)
-  }
-  throw new Error(`unsupported dictionary expression "${text}" in ${sourceFile}`)
-}
-
-/** Extract the `en` entry from an options object body. */
-async function dictionaryFromOptions(sourceFile, body, imports, consts) {
-  for (const property of splitTopLevel(body)) {
-    const colon = property.indexOf(':')
-    const rawKey = (colon === -1 ? property : property.slice(0, colon)).trim()
-    const key = rawKey.replace(/^['"]|['"]$/g, '')
-    if (key !== 'en' && key !== `'en'`) continue
-    const value = colon === -1 ? 'en' : property.slice(colon + 1).trim()
-    return resolveDictionary(sourceFile, value, imports, consts)
+async function dictionaryFromOptions(sourceFile, body, imports, symbols) {
+  const options = evaluateStatic(`{${body}}`, symbols)
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return undefined
+  const direct = options.en
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) return direct
+  // Shorthand imported identifier may have remained unresolved in the first pass.
+  if (/^\s*en\s*(?:,|$)/m.test(body) && imports.has('en')) {
+    return resolveDictionary(sourceFile, 'en', imports, symbols)
   }
   return undefined
 }
 
-/** Extract the English entry from a `[locale, dict]` tuple list. */
-function dictionaryFromLocaleTuples(text) {
-  const match = text.match(/\[\s*['"]en['"]\s*,\s*\{/)
+/** Extract the English entry from a static `[locale, dict]` tuple list. */
+function dictionaryFromLocaleTuples(text, symbols) {
+  const match = text.match(/\[\s*['\"]en['\"]\s*,\s*\{/)
   if (!match) return undefined
   const brace = text.indexOf('{', match.index + match[0].length - 1)
   const balanced = extractBalanced(text, brace)
   if (!balanced) return undefined
-  return evaluateLiteral(balanced.text)
+  const value = evaluateStatic(balanced.text, symbols)
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 }
 
-/** Resolve a namespace expression to its string value. */
-async function resolveNamespace(sourceFile, expression, imports, consts) {
+/** Resolve a namespace expression to its static string value. */
+async function resolveNamespace(sourceFile, expression, imports, symbols) {
+  const local = evaluateStatic(expression, symbols)
+  if (typeof local === 'string') return local
   const text = expression.trim()
-  const literal = text.match(/^['"]([^'"]+)['"]$/)
-  if (literal) return literal[1]
-  if (/^[A-Za-z_$][\w$]*$/.test(text)) {
-    if (consts.has(text)) return consts.get(text)
-    if (imports.has(text)) {
-      const value = await loadImportedExport(sourceFile, imports.get(text))
-      if (typeof value === 'string') return value
-    }
+  if (/^[A-Za-z_$][\w$]*$/.test(text) && imports.has(text)) {
+    const imported = await loadImportedExport(sourceFile, imports.get(text))
+    if (typeof imported === 'string') return imported
   }
   return undefined
 }
@@ -218,13 +249,12 @@ export async function scanSourceHarness(detected) {
   for (const file of files) {
     let text
     try {
-      text = fs.readFileSync(file, 'utf8')
+      text = stripComments(fs.readFileSync(file, 'utf8'))
     } catch {
       continue
     }
     if (!text.includes('locale.register')) continue
-    const imports = parseImportMap(text)
-    const consts = parseStringConsts(text)
+    const { symbols, imports } = await collectSourceSymbols(file, text)
     const calls = findRegisterCalls(text)
 
     for (const call of calls) {
@@ -236,7 +266,7 @@ export async function scanSourceHarness(detected) {
       }
       let namespace
       try {
-        namespace = await resolveNamespace(file, nsArg, imports, consts)
+        namespace = await resolveNamespace(file, nsArg, imports, symbols)
       } catch (error) {
         warnings.push(`${file}: namespace ${nsArg}: ${error.message}`)
         continue
@@ -249,9 +279,9 @@ export async function scanSourceHarness(detected) {
       let dictionary
       try {
         if (second && second.trim().startsWith('{')) {
-          dictionary = await dictionaryFromOptions(file, second.trim().slice(1, -1), imports, consts)
+          dictionary = await dictionaryFromOptions(file, second.trim().slice(1, -1), imports, symbols)
         } else if (third) {
-          dictionary = dictionaryFromLocaleTuples(text)
+          dictionary = dictionaryFromLocaleTuples(text, symbols)
         }
       } catch (error) {
         warnings.push(`${file}: dictionary for ${namespace}: ${error.message}`)

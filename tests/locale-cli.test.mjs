@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -127,6 +128,61 @@ try {
     const catalog = JSON.parse(fs.readFileSync(esFile, 'utf8'))
     assert.equal(catalog.locale, 'es')
     assert.equal(catalog.namespaces['settings.locale']['language.title'], 'Idioma')
+  }
+
+  // Invalid identifiers and traversal fail before any output is written.
+  {
+    const escape = path.resolve(root, '..', `dsh-locale-escape-${process.pid}`)
+    fs.rmSync(escape, { recursive: true, force: true })
+    const badPath = run([
+      'generate', 'xy', '--label', 'Test', '--harness', fixture, '--no-translate',
+      '--out', escape, '--catalog-out', path.join(tmp, 'xy.json'),
+    ])
+    assert.equal(badPath.status, 1)
+    assert.match(badPath.stderr, /escapes the repository root/)
+    assert.equal(fs.existsSync(escape), false)
+
+    const insidePlugin = path.join(tmp, 'should-not-be-written')
+    const escapeCatalog = path.resolve(root, '..', `dsh-locale-catalog-escape-${process.pid}.json`)
+    fs.rmSync(insidePlugin, { recursive: true, force: true })
+    fs.rmSync(escapeCatalog, { force: true })
+    const badCatalogPath = run([
+      'generate', 'xy', '--label', 'Test', '--harness', fixture, '--no-translate',
+      '--out', insidePlugin, '--catalog-out', escapeCatalog,
+    ])
+    assert.equal(badCatalogPath.status, 1)
+    assert.match(badCatalogPath.stderr, /catalog output escapes the repository root/)
+    assert.equal(fs.existsSync(insidePlugin), false, 'invalid catalog output must fail before plugin writes')
+    assert.equal(fs.existsSync(escapeCatalog), false)
+
+    for (const args of [
+      ['generate', '../xy', '--label', 'Test', '--dry-run', '--harness', fixture],
+      ['generate', 'xy', '--label', 'Test', '--dry-run', '--harness', fixture, '--name', 'Bad Name'],
+      ['generate', 'xy', '--label', 'Test', '--dry-run', '--harness', fixture, '--id', 'bad\"id'],
+      ['generate', 'xy', '--label', 'Test', '--dry-run', '--harness', fixture, '--version', '1.0'],
+      ['generate', 'xy', '--label', 'Test', '--dry-run', '--harness', fixture, '--fallback', '../en'],
+    ]) {
+      assert.equal(run(args).status, 1, `expected failure for ${JSON.stringify(args)}`)
+    }
+  }
+
+  // A symlink inside the repository cannot redirect generated output outside it.
+  {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-outside-'))
+    const link = path.join(tmp, 'outside-link')
+    try {
+      fs.symlinkSync(outside, link, 'dir')
+      const outcome = run([
+        'generate', 'xy', '--label', 'Test', '--harness', fixture, '--no-translate',
+        '--out', path.join(link, 'plugin'), '--catalog-out', path.join(tmp, 'xy-link.json'),
+      ])
+      assert.equal(outcome.status, 1)
+      assert.match(outcome.stderr, /symbolic link/)
+      assert.equal(fs.existsSync(path.join(outside, 'plugin')), false)
+    } finally {
+      fs.rmSync(link, { force: true })
+      fs.rmSync(outside, { recursive: true, force: true })
+    }
   }
 
   console.log('CLI tests: PASS')

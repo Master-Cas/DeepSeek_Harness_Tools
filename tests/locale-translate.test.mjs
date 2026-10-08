@@ -18,7 +18,7 @@ function mockFetch(handler) {
   const fetchImpl = async (url, init) => {
     const body = JSON.parse(init.body)
     const request = JSON.parse(body.messages[1].content)
-    calls.push({ url, body, request })
+    calls.push({ url, body, request, redirect: init.redirect, hasSignal: Boolean(init.signal) })
     const translations = handler(request, calls.length)
     return {
       ok: true,
@@ -167,6 +167,31 @@ const entries = [
       },
     }),
     (error) => !error.message.includes(secret) && error.message.includes('[REDACTED]'),
+  )
+}
+
+
+// API URLs cannot smuggle credentials in the authority component.
+assert.throws(
+  () => resolveApiConfig({ apiKey: 'test', apiUrl: 'https://user:pass@example.invalid/v1' }),
+  /must not contain embedded credentials/,
+)
+
+// The timeout aborts a request that never resolves.
+{
+  await assert.rejects(
+    translateEntries({
+      entries: [entries[0]],
+      targetLocale: 'es',
+      config: { apiKey: 'test', apiUrl: 'https://example.invalid/v1', model: 'mock' },
+      requestTimeoutMs: 20,
+      protectedTerms: [],
+      fetchImpl: async (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted by test')), { once: true })
+        }),
+    }),
+    (error) => error instanceof TranslationError && /aborted by test/.test(error.message),
   )
 }
 

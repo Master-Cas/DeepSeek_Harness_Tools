@@ -197,6 +197,69 @@ export function percent(ratio) {
   return `${(ratio * 100).toFixed(1)}%`
 }
 
+export const PACKAGE_NAME_PATTERN = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
+export const PLUGIN_ID_PATTERN = /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/
+export const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+
+export function validateLocaleId(value, label = 'locale') {
+  if (typeof value !== 'string' || !LOCALE_ID_PATTERN.test(value)) {
+    throw new Error(`invalid ${label} identifier`)
+  }
+  return value
+}
+
+export function validatePackageName(value) {
+  if (typeof value !== 'string' || !PACKAGE_NAME_PATTERN.test(value) || value.length > 214) {
+    throw new Error('invalid package name')
+  }
+  return value
+}
+
+export function validatePluginId(value) {
+  if (typeof value !== 'string' || !PLUGIN_ID_PATTERN.test(value) || value.length > 214) {
+    throw new Error('invalid plugin id')
+  }
+  return value
+}
+
+export function validateVersion(value) {
+  if (typeof value !== 'string' || !VERSION_PATTERN.test(value)) throw new Error('invalid version')
+  return value
+}
+
+export function validateTextField(value, label) {
+  if (typeof value !== 'string' || value.length === 0 || value.includes('\u0000')) {
+    throw new Error(`invalid ${label}`)
+  }
+  return value
+}
+
+function pathIsInside(root, candidate) {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+}
+
+/** Resolve a write target below `root`, rejecting traversal and symlink escapes. */
+export function resolveOutputPath(root, candidate, label = 'output path') {
+  if (typeof candidate !== 'string' || !candidate.trim() || candidate.includes('\u0000')) {
+    throw new Error(`invalid ${label}`)
+  }
+  const lexicalRoot = path.resolve(root)
+  const target = path.resolve(lexicalRoot, candidate)
+  if (!pathIsInside(lexicalRoot, target)) throw new Error(`${label} escapes the repository root`)
+
+  const realRoot = fs.realpathSync(lexicalRoot)
+  let probe = target
+  while (!fs.existsSync(probe)) {
+    const parent = path.dirname(probe)
+    if (parent === probe) break
+    probe = parent
+  }
+  const realProbe = fs.realpathSync(probe)
+  if (!pathIsInside(realRoot, realProbe)) throw new Error(`${label} escapes through a symbolic link`)
+  return target
+}
+
 /**
  * Resolve a harness installation from an explicit value, env or common paths.
  *

@@ -3,6 +3,7 @@
  * extra/untranslated handling and the strict mode.
  */
 import assert from 'node:assert/strict'
+import { buildSourceHashes } from '../tools/lib/generate.mjs'
 import { formatValidationReport, validateCatalogs } from '../tools/lib/validate.mjs'
 
 const source = {
@@ -32,6 +33,10 @@ const source = {
   const report = validateCatalogs(source, { namespaces: { common: { ok: 'Aceptar', cancel: 'Cancelar' } } })
   assert.equal(report.pass, false)
   assert.ok(report.errors.some((error) => error.includes('missing namespace "chat"')))
+  assert.equal(report.stats.sourceKeys, 4)
+  assert.equal(report.stats.translated, 2)
+  assert.equal(report.stats.missing, 2)
+  assert.equal(report.stats.coverage, '50.0%')
 }
 
 // Missing key fails.
@@ -87,6 +92,41 @@ const source = {
   assert.equal(strict.pass, false)
   assert.ok(strict.errors.some((error) => error.includes('extra key "common.legacy"')))
   assert.ok(strict.errors.some((error) => error.includes('untranslated')))
+}
+
+// A recorded source hash makes stale translations a hard failure.
+{
+  const oldSource = { namespaces: { x: { greeting: 'Hello' } } }
+  const currentSource = { namespaces: { x: { greeting: 'Welcome' } } }
+  const target = {
+    namespaces: { x: { greeting: 'Hola' } },
+    meta: { sourceHashAlgorithm: 'sha256', sourceHashes: buildSourceHashes(oldSource) },
+  }
+  const report = validateCatalogs(currentSource, target)
+  assert.equal(report.pass, false)
+  assert.ok(report.errors.some((error) => error.includes('stale translation \"x.greeting\"')))
+}
+
+// Legacy catalogs remain usable but their unverifiable provenance is explicit.
+{
+  const report = validateCatalogs(
+    { namespaces: { x: { greeting: 'Hello' } } },
+    { namespaces: { x: { greeting: 'Hola' } } },
+  )
+  assert.equal(report.pass, true)
+  assert.ok(report.warnings.some((warning) => warning.includes('no verified historical source hash')))
+}
+
+// Strict mode permits protected technical tokens that legitimately stay identical.
+{
+  const technicalSource = { namespaces: { x: { format: 'JSON', action: 'Cancel' } } }
+  const target = {
+    namespaces: { x: { format: 'JSON', action: 'Cancelar' } },
+    meta: { sourceHashAlgorithm: 'sha256', sourceHashes: buildSourceHashes(technicalSource) },
+  }
+  const report = validateCatalogs(technicalSource, target, { strict: true })
+  assert.equal(report.pass, true, report.errors.join('; '))
+  assert.equal(report.details.untranslated.includes('x.format'), false)
 }
 
 // Protected-term reporting is opt-in.

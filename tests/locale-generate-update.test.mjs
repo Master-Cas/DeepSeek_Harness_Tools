@@ -2,12 +2,14 @@
  * Generation and update tests with in-memory catalogs and a stub translator.
  */
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { catalogFromPlugin, loadCatalog, writeCatalog } from '../tools/lib/catalog.mjs'
 import {
   buildPluginFiles,
+  buildSourceHashes,
   generateLanguagePack,
   planTranslationMemory,
 } from '../tools/lib/generate.mjs'
@@ -41,6 +43,34 @@ const existing = {
   assert.ok(plan.pending.some((entry) => entry.key === 'k1'))
 }
 
+// Source hashes invalidate reuse when English meaning or placeholders change.
+{
+  const oldSource = { namespaces: { a: { k1: 'Hello {n}' } } }
+  const hashed = {
+    namespaces: { a: { k1: 'Hola {n}' } },
+    meta: { sourceHashAlgorithm: 'sha256', sourceHashes: buildSourceHashes(oldSource) },
+  }
+
+  const meaningChanged = planTranslationMemory({ namespaces: { a: { k1: 'Welcome {n}' } } }, hashed)
+  assert.equal(meaningChanged.reused.a.k1, undefined)
+  assert.equal(meaningChanged.pending[0].reason, 'source-changed')
+  assert.equal(meaningChanged.modified.length, 1)
+
+  const placeholderChanged = planTranslationMemory({ namespaces: { a: { k1: 'Hello {name}' } } }, hashed)
+  assert.equal(placeholderChanged.pending[0].reason, 'source-changed')
+  assert.equal(placeholderChanged.modified.length, 1)
+}
+
+// Empty values are never reusable, while pre-hash catalogs migrate explicitly.
+{
+  const empty = planTranslationMemory(source, { namespaces: { a: { k1: '' } } })
+  assert.equal(empty.pending.find((entry) => entry.key === 'k1').reason, 'empty')
+
+  const legacy = planTranslationMemory(source, existing)
+  assert.equal(legacy.legacyUnverified.includes('a\u0000k1'), true)
+  assert.equal(legacy.reused.a.k1, 'Hola {n}')
+}
+
 // buildPluginFiles emits a loadable Harness bundle.
 {
   const files = buildPluginFiles({
@@ -54,16 +84,44 @@ const existing = {
     namespaces: { a: { k1: 'Hola {n}' } },
   })
   assert.ok(files['client.js'].includes('addLanguage'))
-  assert.ok(files['client.js'].includes("id: 'xx'"))
+  assert.ok(files['client.js'].includes('id: "xx"'))
   assert.ok(files['client.js'].includes('"a"'))
   const pkg = JSON.parse(files['package.json'])
   assert.equal(pkg.name, 'deepseek-xx')
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
-  assert.ok(files['cordis.patch.yml'].includes(pkg.name))
+  assert.ok(files['cordis.patch.yml'].includes(`name: ${JSON.stringify(pkg.name)}`))
   assert.ok(files['LICENSE'].includes('MASTER-CAS PERSONAL USE LICENSE v1.0'))
   assert.equal(pkg.license, 'SEE LICENSE IN LICENSE')
 }
+
+// User-visible text is serialized, not interpolated into executable syntax.
+{
+  const files = buildPluginFiles({
+    name: '@master-cas/deepseek-zz',
+    id: '@master-cas/deepseek-zz',
+    version: '1.2.3',
+    description: 'safe syntax fixture',
+    locale: 'zz',
+    label: 'Quote \" and newline\nlabel',
+    fallback: 'en',
+    namespaces: { x: { value: 'Line 1\nLine 2 ` ${notCode}' } },
+  })
+  const syntaxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-syntax-'))
+  try {
+    const file = path.join(syntaxDir, 'client.js')
+    fs.writeFileSync(file, files['client.js'])
+    const checked = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
+    assert.equal(checked.status, 0, checked.stderr)
+    assert.ok(files['cordis.patch.yml'].includes('name: \"@master-cas/deepseek-zz\"'))
+  } finally {
+    fs.rmSync(syntaxDir, { recursive: true, force: true })
+  }
+}
+
+assert.throws(() => buildPluginFiles({ name: '../escape', id: '@safe/id', version: '1.0.0', locale: 'xx', label: 'X', fallback: 'en', namespaces: {} }), /invalid package name/)
+assert.throws(() => buildPluginFiles({ name: '@safe/name', id: 'bad\"\\nid', version: '1.0.0', locale: 'xx', label: 'X', fallback: 'en', namespaces: {} }), /invalid plugin id/)
+assert.throws(() => buildPluginFiles({ name: '@safe/name', id: '@safe/id', version: '1.0', locale: 'xx', label: 'X', fallback: 'en', namespaces: {} }), /invalid version/)
 
 // Full generation with a stub translator writes catalog and plugin.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-gen-'))
@@ -85,11 +143,15 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-gen-'))
     catalogFile: path.join(dir, 'xx.json'),
   })
   assert.equal(result.reused, 1)
+  assert.equal(result.legacyReused, 1)
   assert.equal(result.translated, 2)
   assert.deepEqual(seen.sort(), ['a\u0000k2', 'b\u0000z'])
   assert.equal(result.catalog.namespaces.a.k1, 'Hola {n}')
   assert.equal(result.catalog.namespaces.a.k2, '[xx] Bye')
   assert.equal(result.catalog.namespaces.b.z, '[xx] Zed')
+  assert.equal(result.catalog.meta.sourceHashAlgorithm, 'sha256')
+  assert.equal(result.catalog.meta.sourceHashes.a.k1, buildSourceHashes(source).a.k1)
+  assert.ok(result.catalog.meta.legacyUnverified.includes('a\u0000k1'))
   assert.ok(fs.existsSync(path.join(dir, 'plugin', 'client.js')))
   assert.ok(fs.existsSync(path.join(dir, 'plugin', 'package.json')))
 
@@ -180,6 +242,19 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-locale-gen-'))
   assert.equal(dry.dryRun, true)
   assert.equal(dry.added, 1)
   assert.equal(dry.coverage.ratio > 0, true)
+
+
+  // Once a hashed catalog is current, repeating the update is a no-op.
+  const repeat = await updateLanguagePack({
+    source: nextSource,
+    existing: pruned.catalog,
+    locale: 'xx',
+    label: 'Testish',
+    noTranslate: true,
+  })
+  assert.equal(repeat.modified, 0)
+  assert.equal(repeat.pending, 0)
+  assert.equal(repeat.reused, 3)
 }
 
 fs.rmSync(dir, { recursive: true, force: true })

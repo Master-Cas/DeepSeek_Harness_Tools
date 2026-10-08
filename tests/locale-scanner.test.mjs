@@ -30,9 +30,70 @@ assert.equal(fixture.namespaces.gamma.bye, 'Bye {who}')
 // delta: custom namespace const and aliased dictionary exports
 assert.equal(fixture.namespaces.delta.two, 'two {x}')
 
+// A source checkout is data: imported locale modules may contain arbitrary
+// top-level code, including non-terminating code, without ever executing it.
+{
+  const adversarial = fs.mkdtempSync(path.join(root, '.tmp-locale-source-static-'))
+  const marker = path.join(adversarial, 'executed')
+  try {
+    const client = path.join(adversarial, 'packages', 'evil', 'src', 'client')
+    fs.mkdirSync(client, { recursive: true })
+    fs.writeFileSync(path.join(adversarial, 'package.json'), JSON.stringify({ name: 'static-fixture', version: '1.0.0' }))
+    fs.writeFileSync(
+      path.join(client, 'locales.ts'),
+      `import fs from 'node:fs'\n` +
+        `fs.writeFileSync(${JSON.stringify(marker)}, 'EXECUTED')\n` +
+        `while (true) {}\n` +
+        `export const NS = 'adversarial.static'\n` +
+        `export const en = { hello: 'Hello {name}', special: 'Café ☕' }\n`,
+    )
+    fs.writeFileSync(
+      path.join(client, 'index.ts'),
+      `import { NS, en } from './locales.ts'\n` +
+        `export function apply(ctx: any) { ctx.locale.register(NS, { en }) }\n`,
+    )
+    const scanned = await scanHarness(adversarial)
+    assert.equal(scanned.namespaces['adversarial.static'].hello, 'Hello {name}')
+    assert.equal(scanned.namespaces['adversarial.static'].special, 'Café ☕')
+    assert.equal(fs.existsSync(marker), false, 'source module side effect must never execute')
+  } finally {
+    fs.rmSync(adversarial, { recursive: true, force: true })
+  }
+}
+
+// The pinned 0.1.6-alpha.2 runtime uses a named re-export for common.en.
+{
+  const dir = fs.mkdtempSync(path.join(root, '.tmp-locale-reexport-'))
+  try {
+    const file = path.join(dir, 'registry.ts')
+    const locales = path.join(dir, 'locales')
+    fs.mkdirSync(locales)
+    fs.writeFileSync(file, "import { en } from './locales/index.ts'\n")
+    fs.writeFileSync(path.join(locales, 'index.ts'), "export { en } from './en.ts'\n")
+    fs.writeFileSync(path.join(locales, 'en.ts'), "export const en = { greeting: 'Hello' }\n")
+    const { loadImportedExport } = await import('../tools/lib/harness-scan.mjs')
+    assert.deepEqual(
+      await loadImportedExport(file, { source: './locales/index.ts', imported: 'en' }),
+      { greeting: 'Hello' },
+    )
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+// Guard the implementation itself against reintroducing source execution.
+{
+  const scannerSource = fs.readFileSync(path.join(root, 'tools', 'lib', 'harness-scan.mjs'), 'utf8')
+  assert.equal(scannerSource.includes('new Function'), false)
+  assert.equal(/\bimport\s*\(/.test(scannerSource), false)
+}
+
 const HARNESS = process.env.DSH_HARNESS ?? '/home/ubuntu/deepseek-harness'
 if (!fs.existsSync(path.join(HARNESS, 'package.json'))) {
-  console.log(`scanner tests: fixture PASS; real harness not found at ${HARNESS} (skipped)`)
+  if (process.env.DSH_HARNESS_REQUIRED === '1') {
+    throw new Error(`M6 real Harness checkout required but missing at ${HARNESS}`)
+  }
+  console.log(`scanner tests: fixture PASS; real harness not found at ${HARNESS} (SKIPPED)`)
 } else {
   const scan = await scanHarness(HARNESS)
   assert.equal(scan.mode, 'source', 'real harness mode')

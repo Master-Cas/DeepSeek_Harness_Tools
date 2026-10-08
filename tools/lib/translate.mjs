@@ -26,6 +26,23 @@ export { resolveStoredHarnessCredential }
 /** Default OpenAI-compatible endpoint. */
 export const DEFAULT_API_URL = 'https://api.deepseek.com/v1/chat/completions'
 
+/** Only this origin may receive a credential recovered automatically from Harness. */
+function isOfficialDeepSeekEndpoint(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'api.deepseek.com' && !url.username && !url.password && (url.port === '' || url.port === '443')
+  } catch {
+    return false
+  }
+}
+
+function ensureStoredCredentialDestination(config) {
+  if (!isOfficialDeepSeekEndpoint(config.apiUrl)) {
+    throw new TranslationError('stored Harness credential cannot be used with a custom API endpoint; supply an explicit API key')
+  }
+}
+
+
 /** Default model id. */
 export const DEFAULT_MODEL = 'deepseek-chat'
 
@@ -44,7 +61,16 @@ export function resolveApiConfig(options = {}) {
   const apiKey = options.apiKey ?? process.env.DSH_LOCALE_API_KEY ?? process.env.DEEPSEEK_API_KEY
   const apiUrl = options.apiUrl ?? process.env.DSH_LOCALE_API_URL ?? DEFAULT_API_URL
   const model = options.model ?? process.env.DSH_LOCALE_MODEL ?? DEFAULT_MODEL
-  return { apiKey, apiUrl, model }
+  let parsed
+  try {
+    parsed = new URL(apiUrl)
+  } catch {
+    throw new TranslationError('API URL must be an absolute URL')
+  }
+  if (parsed.username || parsed.password) {
+    throw new TranslationError('API URL must not contain embedded credentials')
+  }
+  return { apiKey, apiUrl: parsed.href, model }
 }
 
 /**
@@ -74,6 +100,7 @@ export async function resolveApiConfigAsync(options = {}, deps = {}) {
   const resolveStored = deps.resolveStoredHarnessCredential ?? resolveStoredHarnessCredential
   const stored = await resolveStored(options)
   if (typeof stored === 'string' && stored.length > 0) {
+    ensureStoredCredentialDestination(config)
     return { ...config, apiKey: rememberSecret(stored) }
   }
   return config
@@ -213,6 +240,7 @@ export async function translateEntries(request) {
     maxChars = 6000,
     maxRetries = 3,
     onUnresolved = 'throw',
+    requestTimeoutMs = 30000,
     onProgress = () => {},
   } = request
 
@@ -247,6 +275,7 @@ export async function translateEntries(request) {
         fetchImpl,
         system: prompt,
         user: userContent,
+        requestTimeoutMs,
       })
       let translations
       try {
@@ -290,11 +319,18 @@ export async function translateEntries(request) {
 }
 
 /** Perform one chat-completions call and return the assistant text. */
-async function callApi({ config, fetchImpl, system, user }) {
+async function callApi({ config, fetchImpl, system, user, requestTimeoutMs = 30000 }) {
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 300000) {
+    throw new TranslationError('requestTimeoutMs must be an integer between 1 and 300000')
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs)
   let response
   try {
     response = await fetchImpl(config.apiUrl, {
       method: 'POST',
+      redirect: 'error',
+      signal: controller.signal,
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${config.apiKey}`,
@@ -309,17 +345,20 @@ async function callApi({ config, fetchImpl, system, user }) {
         ],
       }),
     })
+    if (!response.ok) {
+      const body = await safeText(response)
+      throw new TranslationError(`API responded ${response.status}: ${redact(body).slice(0, 300)}`)
+    }
+    const json = await response.json()
+    const content = json?.choices?.[0]?.message?.content
+    if (typeof content !== 'string') throw new TranslationError('API response carried no message content')
+    return content
   } catch (error) {
+    if (error instanceof TranslationError) throw error
     throw new TranslationError(`request to ${redact(config.apiUrl)} failed: ${error.message}`)
+  } finally {
+    clearTimeout(timer)
   }
-  if (!response.ok) {
-    const body = await safeText(response)
-    throw new TranslationError(`API responded ${response.status}: ${redact(body).slice(0, 300)}`)
-  }
-  const json = await response.json()
-  const content = json?.choices?.[0]?.message?.content
-  if (typeof content !== 'string') throw new TranslationError('API response carried no message content')
-  return content
 }
 
 /** Read a response body without throwing. */
