@@ -18,7 +18,7 @@
  */
 
 /** Recursively collect `const`-like declarations: name -> raw expression text. */
-const DECLARATION_PATTERN = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g
+const DECLARATION_PATTERN = /\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=/g
 
 /**
  * Strip `//` and block comments while preserving string and template literal

@@ -6,8 +6,15 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import vm from 'node:vm'
 import { sortedKeys, writeJson } from './util.mjs'
+import {
+  collectDeclarations,
+  evaluateStatic,
+  extractBalanced,
+  findRegisterCalls,
+  parseStringLiteral,
+  stripComments,
+} from './static-js.mjs'
 
 /** Current catalog schema version. */
 export const CATALOG_VERSION = 1
@@ -66,70 +73,161 @@ export function loadCatalog(file) {
 }
 
 /**
- * Read every dictionary and the language definition out of a Harness
- * language-pack `client.js`. The module registers through
- * `window.__ModuleLoader__`, so it is evaluated in an isolated VM context
- * with a mock locale service — no Harness runtime required.
- *
- * @param {string} file path to the pack's `client.js`.
- * @returns {{ id: string, locale: string|undefined, label: string|undefined, fallback: string|undefined, namespaces: Record<string, Record<string,string>> }}
+ * Maximum client.js size accepted by the static importer. Language packs are
+ * tiny compared with this ceiling; the bound prevents accidental memory abuse.
  */
-export function catalogFromPlugin(file) {
-  const source = fs.readFileSync(file, 'utf8')
-  let registration
-  const sandbox = {
-    window: {
-      __ModuleLoader__: {
-        load(value) {
-          registration = value
-        },
-      },
-    },
-    console,
+const MAX_PLUGIN_BYTES = 5 * 1024 * 1024
+const MAX_PLUGIN_NAMESPACES = 5000
+const MAX_PLUGIN_KEYS = 200000
+
+/** Return the arguments of the first call matching `pattern`. */
+function firstCallArgs(text, pattern) {
+  const match = pattern.exec(text)
+  if (!match) return undefined
+  const open = text.indexOf('(', match.index)
+  const balanced = extractBalanced(text, open)
+  if (!balanced) throw new Error('malformed JavaScript: unterminated call expression')
+  return balanced.text.slice(1, -1).trim()
+}
+
+function codeOutsideStrings(text) {
+  let out = ''
+  let quote
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
+    if (quote) {
+      if (char === '\\') { i++; out += '  '; continue }
+      if (char === quote) quote = undefined
+      out += ' '
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') { quote = char; out += ' '; continue }
+    out += char
   }
-  vm.runInNewContext(source, sandbox, { filename: file })
-  if (!registration) throw new Error(`${file} did not register with window.__ModuleLoader__`)
+  return out
+}
 
-  let language
-  const byLocale = new Map()
-  const plugin = registration.factory()
-  const ctx = {
-    locale: {
-      addLanguage(value) {
-        language = value
-        return () => {}
-      },
-      register(namespace, locale, dictionary) {
-        if (!byLocale.has(locale)) byLocale.set(locale, {})
-        byLocale.get(locale)[namespace] = dictionary
-        return () => {}
-      },
-    },
-    effect(effect) {
-      effect()
-    },
-  }
-  plugin.apply(ctx)
-
-  const targetLocale =
-    (language?.id && byLocale.has(language.id) ? language.id : undefined) ??
-    [...byLocale.keys()].find((id) => id !== 'en') ??
-    [...byLocale.keys()][0]
-  const namespaces = byLocale.get(targetLocale) ?? {}
-
-  const clean = {}
-  for (const namespace of sortedKeys(namespaces)) {
-    clean[namespace] = {}
-    for (const key of sortedKeys(namespaces[namespace])) {
-      clean[namespace][key] = String(namespaces[namespace][key])
+/** Ensure a recovered dictionary is plain string data and enforce size bounds. */
+function normalizeStaticNamespaces(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const out = {}
+  let keys = 0
+  for (const namespace of sortedKeys(value)) {
+    const dictionary = value[namespace]
+    if (!dictionary || typeof dictionary !== 'object' || Array.isArray(dictionary)) {
+      throw new Error(`unsupported dynamic dictionary for namespace "${namespace}"`)
+    }
+    out[namespace] = {}
+    for (const key of sortedKeys(dictionary)) {
+      const entry = dictionary[key]
+      if (typeof entry !== 'string') {
+        throw new Error(`unsupported non-string translation at "${namespace}.${key}"`)
+      }
+      out[namespace][key] = entry
+      keys++
+      if (keys > MAX_PLUGIN_KEYS) throw new Error('plugin catalog exceeds the maximum key count')
+    }
+    if (Object.keys(out).length > MAX_PLUGIN_NAMESPACES) {
+      throw new Error('plugin catalog exceeds the maximum namespace count')
     }
   }
+  return out
+}
+
+/**
+ * Read a Harness language-pack `client.js` as inert text.
+ *
+ * Supported shapes are deliberately narrow:
+ *   - generated packs with a static `const dictionaries = { ... }` followed by
+ *     `Object.entries(dictionaries)` registration;
+ *   - explicit static `locale.register(namespace, locale, dictionary)` calls;
+ *   - static `locale.register(namespace, { en, xx })` option objects.
+ *
+ * No JavaScript is executed. Unknown/dynamic constructs fail closed.
+ */
+export function catalogFromPlugin(file) {
+  const stat = fs.statSync(file)
+  if (!stat.isFile()) throw new Error(`${file} is not a regular file`)
+  if (stat.size > MAX_PLUGIN_BYTES) throw new Error(`${file} exceeds the static import size limit`)
+
+  const raw = fs.readFileSync(file, 'utf8')
+  const text = stripComments(raw)
+  const symbols = collectDeclarations(text)
+
+  let id
+  const loadArgs = firstCallArgs(text, /(?:window\.)?__ModuleLoader__\.load\s*\(/)
+  if (loadArgs) {
+    const registration = evaluateStatic(loadArgs, symbols)
+    if (registration && typeof registration.id === 'string') id = registration.id
+    if (!id) {
+      const match = /\bid\s*:\s*(["'][\s\S]*?["'])/.exec(loadArgs)
+      if (match) id = parseStringLiteral(match[1])
+    }
+  }
+  if (!id) throw new Error(`${file} has no statically resolvable module id`)
+
+  let language
+  const languageArgs = firstCallArgs(text, /locale\.addLanguage\s*\(/)
+  if (languageArgs) {
+    const value = evaluateStatic(languageArgs, symbols)
+    if (value && typeof value === 'object' && !Array.isArray(value)) language = value
+  }
+
+  let targetLocale = typeof language?.id === 'string' ? language.id : undefined
+  let namespaces
+
+  if (
+    symbols.has('dictionaries') &&
+    /Object\.entries\s*\(\s*dictionaries\s*\)/.test(text) &&
+    /locale\.register\s*\(/.test(text)
+  ) {
+    const expression = symbols.get('dictionaries')
+    const structural = codeOutsideStrings(expression)
+    if (/=>|\bnew\s|\bawait\b|\byield\b|\bfunction\b|\b[A-Za-z_$][\w$]*\s*\(/.test(structural)) {
+      throw new Error(`${file} uses dynamic dictionary expressions that cannot be imported safely`)
+    }
+    namespaces = normalizeStaticNamespaces(evaluateStatic(expression, symbols))
+  }
+
+  const direct = {}
+  for (const call of findRegisterCalls(text)) {
+    const [nsArg, second, third] = call.args
+    const namespace = evaluateStatic(nsArg, symbols)
+    if (typeof namespace !== 'string') continue
+    if (third) {
+      const locale = evaluateStatic(second, symbols)
+      if (typeof locale !== 'string') continue
+      if (!targetLocale && locale !== 'en') targetLocale = locale
+      if (targetLocale && locale !== targetLocale) continue
+      const dictionary = evaluateStatic(third, symbols)
+      if (dictionary && typeof dictionary === 'object' && !Array.isArray(dictionary)) {
+        direct[namespace] = dictionary
+      }
+      continue
+    }
+    const options = evaluateStatic(second, symbols)
+    if (!options || typeof options !== 'object' || Array.isArray(options)) continue
+    const locale = targetLocale ?? Object.keys(options).find((key) => key !== 'en') ?? 'en'
+    if (!targetLocale && locale !== 'en') targetLocale = locale
+    const dictionary = options[locale]
+    if (dictionary && typeof dictionary === 'object' && !Array.isArray(dictionary)) {
+      direct[namespace] = dictionary
+    }
+  }
+  if (Object.keys(direct).length) {
+    namespaces = { ...(namespaces ?? {}), ...normalizeStaticNamespaces(direct) }
+  }
+
+  if (!namespaces || Object.keys(namespaces).length === 0) {
+    throw new Error(`${file} contains no supported static locale dictionaries`)
+  }
+
   return {
-    id: registration.id,
-    locale: language?.id ?? targetLocale,
-    label: language?.label,
-    fallback: language?.fallback,
-    namespaces: clean,
+    id,
+    locale: typeof language?.id === 'string' ? language.id : targetLocale,
+    label: typeof language?.label === 'string' ? language.label : undefined,
+    fallback: typeof language?.fallback === 'string' ? language.fallback : undefined,
+    namespaces,
   }
 }
 
