@@ -30,6 +30,44 @@ assert.equal(fixture.namespaces.gamma.bye, 'Bye {who}')
 // delta: custom namespace const and aliased dictionary exports
 assert.equal(fixture.namespaces.delta.two, 'two {x}')
 
+// A source checkout is data: imported locale modules may contain arbitrary
+// top-level code, including non-terminating code, without ever executing it.
+{
+  const adversarial = fs.mkdtempSync(path.join(root, '.tmp-locale-source-static-'))
+  const marker = path.join(adversarial, 'executed')
+  try {
+    const client = path.join(adversarial, 'packages', 'evil', 'src', 'client')
+    fs.mkdirSync(client, { recursive: true })
+    fs.writeFileSync(path.join(adversarial, 'package.json'), JSON.stringify({ name: 'static-fixture', version: '1.0.0' }))
+    fs.writeFileSync(
+      path.join(client, 'locales.ts'),
+      `import fs from 'node:fs'\n` +
+        `fs.writeFileSync(${JSON.stringify(marker)}, 'EXECUTED')\n` +
+        `while (true) {}\n` +
+        `export const NS = 'adversarial.static'\n` +
+        `export const en = { hello: 'Hello {name}', special: 'Café ☕' }\n`,
+    )
+    fs.writeFileSync(
+      path.join(client, 'index.ts'),
+      `import { NS, en } from './locales.ts'\n` +
+        `export function apply(ctx: any) { ctx.locale.register(NS, { en }) }\n`,
+    )
+    const scanned = await scanHarness(adversarial)
+    assert.equal(scanned.namespaces['adversarial.static'].hello, 'Hello {name}')
+    assert.equal(scanned.namespaces['adversarial.static'].special, 'Café ☕')
+    assert.equal(fs.existsSync(marker), false, 'source module side effect must never execute')
+  } finally {
+    fs.rmSync(adversarial, { recursive: true, force: true })
+  }
+}
+
+// Guard the implementation itself against reintroducing source execution.
+{
+  const scannerSource = fs.readFileSync(path.join(root, 'tools', 'lib', 'harness-scan.mjs'), 'utf8')
+  assert.equal(scannerSource.includes('new Function'), false)
+  assert.equal(/\bimport\s*\(/.test(scannerSource), false)
+}
+
 const HARNESS = process.env.DSH_HARNESS ?? '/home/ubuntu/deepseek-harness'
 if (!fs.existsSync(path.join(HARNESS, 'package.json'))) {
   console.log(`scanner tests: fixture PASS; real harness not found at ${HARNESS} (skipped)`)
