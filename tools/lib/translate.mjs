@@ -335,19 +335,20 @@ async function callApi({ config, fetchImpl, system, user, requestTimeoutMs = 300
         ],
       }),
     })
+    if (!response.ok) {
+      const body = await safeText(response)
+      throw new TranslationError(`API responded ${response.status}: ${redact(body).slice(0, 300)}`)
+    }
+    const json = await response.json()
+    const content = json?.choices?.[0]?.message?.content
+    if (typeof content !== 'string') throw new TranslationError('API response carried no message content')
+    return content
   } catch (error) {
+    if (error instanceof TranslationError) throw error
     throw new TranslationError(`request to ${redact(config.apiUrl)} failed: ${error.message}`)
   } finally {
     clearTimeout(timer)
   }
-  if (!response.ok) {
-    const body = await safeText(response)
-    throw new TranslationError(`API responded ${response.status}: ${redact(body).slice(0, 300)}`)
-  }
-  const json = await response.json()
-  const content = json?.choices?.[0]?.message?.content
-  if (typeof content !== 'string') throw new TranslationError('API response carried no message content')
-  return content
 }
 
 /** Read a response body without throwing. */
